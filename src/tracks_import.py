@@ -27,8 +27,8 @@ def read_all_recordings_from_csv(base_path: str = "../data/") -> List[dict]:
     return recordings
 
 
-def read_from_csv(tracks_file: str, tracks_meta_file: str,
-                  recording_meta_file: str, include_px_coordinates: bool=False) -> Tuple[List[dict], List[dict], List[dict]]:
+def read_from_csv(tracks_file: str, tracks_meta_file: str, recording_meta_file: str,
+                  fixed_blocks_meta_file: str, include_px_coordinates: bool=False) -> Tuple[List[dict], List[dict], List[dict]]:
     """
     This method reads tracks and meta data for a single recording from csv files
     :param tracks_file: Path of a tracks csv file
@@ -39,7 +39,8 @@ def read_from_csv(tracks_file: str, tracks_meta_file: str,
     recording_meta = read_recording_meta(recording_meta_file)
     tracks_meta = read_tracks_meta(tracks_meta_file)
     tracks = read_tracks(tracks_file, recording_meta, include_px_coordinates)
-    return tracks, tracks_meta, recording_meta
+    fixed_blocks = read_fixed_blocks(fixed_blocks_meta_file)
+    return tracks, tracks_meta, recording_meta, fixed_blocks
 
 
 def read_tracks(tracks_file: str, recording_meta: dict, include_px_coordinates: bool=False) -> List[dict]:
@@ -128,6 +129,28 @@ def read_tracks(tracks_file: str, recording_meta: dict, include_px_coordinates: 
 
         tracks.append(track)
     return tracks
+
+
+def read_fixed_blocks(tracks_meta_file: str) -> List[dict]:
+    """
+    Reads a CSV file where each line contains x,y coordinates like:
+    x1,y1,x2,y2,...,xn,yn
+    Returns a 2D list where each element is a list of [x, y] pairs from each line.
+    """
+    all_coords = []
+    with open(tracks_meta_file, 'r') as file:
+        for line in file:
+            # Strip newline and split by comma
+            values = line.strip().split(',')
+            # Convert string values to floats or ints
+            coords = []
+            # Iterate by pairs (x,y)
+            for i in range(0, len(values), 2):
+                x = float(values[i])
+                y = float(values[i+1])
+                coords.append([x, y])
+            all_coords.append(coords)
+    return all_coords
 
 
 def read_tracks_meta(tracks_meta_file: str) -> List[dict]:

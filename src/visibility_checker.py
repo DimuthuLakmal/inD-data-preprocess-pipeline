@@ -3,7 +3,7 @@ import math
 import matplotlib
 from matplotlib.backend_bases import MouseButton
 
-from src.utils import create_dataframe_chunk
+from src.utils import create_dataframe_chunk, get_rear_fov_polygons, get_driver_center
 
 matplotlib.use('qt5agg')
 
@@ -233,6 +233,8 @@ class TrackVisualizer(object):
         self.bb_boxes = {}
         self.frames_written = []
 
+
+
     def show(self):
         """
         Show the main windows of the Track visualizer.
@@ -243,6 +245,78 @@ class TrackVisualizer(object):
             fig_manager.window.showMaximized()
 
         plt.show()
+
+    def data_write(self):
+        """
+        Main function to draw all tracks and selected annotations for the current frame.
+        :param args: Should be unused if called manually. If called by FuncAnimation, args contains a call counter.
+        :return: List of artist handles that have been updated. Needed for blitting.
+        """
+
+        while self.current_frame < self.maximum_frame:
+
+            bb_boxes = []
+            for track_idx in self.frame_to_track_idxs[self.current_frame]:
+                print(self.current_frame)
+                track = self.tracks[track_idx]
+
+                track_id = track["trackId"]
+                track_meta = self.tracks_meta[track_idx]
+                initial_frame = track_meta["initialFrame"]
+                current_index = self.current_frame - initial_frame
+
+                if track["bboxVis"] is not None:
+                    bounding_box = track["bboxVis"][current_index] / self.scale_down_factor
+                else:
+                    bounding_box = None
+                center_points = track["centerVis"] / self.scale_down_factor
+                center_point = center_points[current_index]
+
+                if bounding_box is not None:
+                    bbox = plt.Polygon(bounding_box, True, facecolor='r', edgecolor="k", **self.bbox_style)
+                else:
+                    x, y = center_point
+                    square_coords = [
+                        (x - 1, y - 1),
+                        (x + 1, y - 1),
+                        (x + 1, y + 1),
+                        (x - 1, y + 1),
+                        (x - 1, y - 1)
+                    ]
+
+                    bbox = plt.Polygon(square_coords, closed=True)
+
+                bbox.center = center_point
+                bbox.heading = track["heading"][current_index]
+                bbox.type = track_meta["class"]
+
+                # Make bbox clickable to open track info window
+                bbox.track_id = track["trackId"]
+
+                self.ax.add_patch(bbox)
+                bb_boxes.append(bbox)
+
+            if self.current_frame not in self.bb_boxes.keys():
+                self.bb_boxes[self.current_frame] = bb_boxes
+
+            # Check the visibility of each track and save the visibility data into a dataframe
+            if self.current_frame not in self.frames_written:
+                self.frames_written.append(self.current_frame)
+                for i, track_idx in enumerate(self.frame_to_track_idxs[self.current_frame]):
+                    track = self.tracks[track_idx]
+                    track_id = track["trackId"]
+                    track_meta = self.tracks_meta[track_idx]
+
+                    if track_meta["class"] == "car" or track_meta["class"] == "truck_bus":
+                        # Check visibility of the track
+                        data = self._find_visibility(track_id)
+                        visibility_data = data['visibility_data']
+
+                        chunk_df = pd.DataFrame(visibility_data)
+                        chunk_df.to_csv(self.csv_file, mode='a', header=False, index=False)
+
+            self.current_frame += 1
+
 
     def _update_figure(self, *args):
         """
@@ -262,7 +336,6 @@ class TrackVisualizer(object):
         plot_handles = []
         bb_boxes = []
         for track_idx in self.frame_to_track_idxs[self.current_frame]:
-            print(self.current_frame)
             track = self.tracks[track_idx]
 
             track_id = track["trackId"]
@@ -306,11 +379,22 @@ class TrackVisualizer(object):
                     else:
                         bbox = plt.Polygon(bounding_box, True, facecolor=bbox_color, edgecolor="k", **self.bbox_style)
                 else:
-                    bbox = plt.Circle(center_point, radius=2, facecolor=bbox_color)
+                    # bbox = plt.Circle(center_point, radius=2, facecolor=bbox_color)
+                    x, y = center_point
+                    square_coords = [
+                        (x - 2, y - 2),
+                        (x + 2, y - 2),
+                        (x + 2, y + 2),
+                        (x - 2, y + 2),
+                        (x - 2, y - 2)
+                    ]
+
+                    bbox = plt.Polygon(square_coords, closed=True, edgecolor="orange", **self.bbox_style)
 
                 bbox.set_animated(animate)
                 bbox.center = center_point
                 bbox.heading = track["heading"][current_index]
+                bbox.type = track_meta["class"]
 
                 # Make bbox clickable to open track info window
                 bbox.set_picker(True)
@@ -318,9 +402,6 @@ class TrackVisualizer(object):
 
                 self.ax.add_patch(bbox)
                 bb_boxes.append(bbox)
-
-                if self.current_frame == 32:
-                    print('heeiiii')
 
                 plot_handles.append(bbox)
 
@@ -408,9 +489,6 @@ class TrackVisualizer(object):
                                            fontsize=12, color="white", animated=animate)
         plot_handles.append(label_current_frame)
 
-        if self.current_frame == 32:
-            print('current frame 4')
-
         # Update current frame
         if self.current_frame == self.maximum_frame:
             self.current_frame = self.minimum_frame
@@ -425,23 +503,6 @@ class TrackVisualizer(object):
 
         if self.current_frame not in self.bb_boxes.keys():
             self.bb_boxes[self.current_frame] = bb_boxes
-
-        if self.current_frame == 32:
-            print('current frame 4')
-
-        # Check the visibility of each track and save the visibility data into a dataframe
-        if self.current_frame not in self.frames_written:
-            self.frames_written.append(self.current_frame)
-            for i, track_idx in enumerate(self.frame_to_track_idxs[self.current_frame]):
-                track = self.tracks[track_idx]
-                track_id = track["trackId"]
-
-                # Check visibility of the track
-                data = self._find_visibility(track_id)
-                visibility_data = data['visibility_data']
-
-                chunk_df = pd.DataFrame(visibility_data)
-                chunk_df.to_csv(self.csv_file, mode='a', header=False, index=False)
 
         return plot_handles
 
@@ -609,36 +670,41 @@ class TrackVisualizer(object):
         holes = [walls]
 
         # set observer position
-        center = None
         heading = None
         other_bboxes = []
+        ego_points = None
+        ego_bbox = None
+        type = None
 
         for i, bb_box in enumerate(self.bb_boxes[self.current_frame]):
             # sorted_xy = self._sort_polygon_clockwise(bb_box.xy)
             # bb_box.xy = np.array(sorted_xy)
+            print('id', i)
             if bb_box.track_id == track_id:
-                center = bb_box.center
+                ego_points = np.array([[int(xy[0]), int(xy[1])] for xy in bb_box.xy[:-1]])
+                ego_bbox = bb_box
                 heading = bb_box.heading
+                type = bb_box.type
             else:
                 points = [vis.Point(int(xy[0]), int(xy[1])) for xy in bb_box.xy[:-1]]
-                # Create the hole polygon
                 hole = vis.Polygon(points)
                 holes.append(hole)
 
                 other_bboxes.append(bb_box)
 
-        x_block_all = []
-        y_block_all = []
+        # Creating barriers on the FOV using fixed blocks in the scene (eg: Buildings)
+        x_block = []
+        y_block = []
         for i, block in enumerate(self.fixed_blocks_info):
-            x_block_all.append([int(xy[0]) for xy in block])
-            y_block_all.append([int(xy[1]) for xy in block])
+            x_block.append([int(xy[0]) for xy in block])
+            y_block.append([int(xy[1]) for xy in block])
 
             points = [vis.Point(int(xy[0]), int(xy[1])) for xy in block[:-1]]
-            # Create the hole polygon
             hole = vis.Polygon(points)
             holes.append(hole)
 
-        observer = vis.Point(int(center[0]), int(center[1]))
+        driver_seat_loc = get_driver_center(ego_points, heading)
+        observer = vis.Point(int(driver_seat_loc[0]), int(driver_seat_loc[1]))
 
         env = vis.Environment(holes)
 
@@ -646,31 +712,26 @@ class TrackVisualizer(object):
         observer.snap_to_boundary_of(env, epsilon)
         observer.snap_to_vertices_of(env, epsilon)
 
-        # Obtein the visibility polygon of the 'observer' in the environmente
+        # Obtain the visibility polygon of the 'observer' in the environment
         # previously define
         isovist = vis.Visibility_Polygon(observer, env, epsilon)
 
-        #### Check if the other bbboxes other than the one of the observer are in the visibility polygon
+        #### Check if the other bbboxes other than the observer are in the visibility polygon
         # First create the visibility polygon of the observer (front and rear view)
-        front_view = self._create_cone([center[0], center[1]], 500, int(heading + 90 - 360), 90, 3)
-        rear_view = self._create_cone([center[0], center[1]], 500, int(heading + 90 - 360 + 180), 30, 3)
+        front_view = self._create_cone([driver_seat_loc[0], driver_seat_loc[1]], self.image_width, int(-1 * heading), 90, 3)
         front_view_x, front_view_y = self._save_print(front_view)
-        rear_view_x, rear_view_y = self._save_print(rear_view)
         front_view_x.append(front_view_x[0])
-        rear_view_x.append(rear_view_x[0])
         front_view_y.append(front_view_y[0])
-        rear_view_y.append(rear_view_y[0])
-
         # Define the front view polygon (container)
         front_view_pol = ShapelyPolygon([(x, y) for x, y in zip(front_view_x, front_view_y)])
-        # Define the rear-view polygon (container)
-        rear_view_pol = ShapelyPolygon([(x, y) for x, y in zip(rear_view_x, rear_view_y)])
+
+        # Rearview polygons (View from side mirrors and rearview mirror)
+        driver_poly, passenger_poly, rear_poly = get_rear_fov_polygons(ego_points, heading, fov_length=self.image_width, type=type)
 
         # Check all other bounding boxes for visibility
-        visible_bboxes = []
-        hidden_bboxes = []
-        x_all_visible, x_all_hidden = [], []
-        y_all_visible, y_all_hidden = [], []
+        visible_front_bboxes, visible_rear_bboxes, hidden_bboxes = [], [],  []
+        x_rear_fov, x_front_fov, x_hidden = [], [], []
+        y_rear_fov, y_front_fov, y_hidden = [], [], []
         for bb_box in other_bboxes:
             direct_line_of_sight = False
             points = [vis.Point(int(xy[0]), int(xy[1])) for xy in bb_box.xy[:-1]]
@@ -678,35 +739,53 @@ class TrackVisualizer(object):
             for point in points:
                 # Check if the point is inside the visibility polygon
                 if point._in(isovist, epsilon):
-                    xs.append([center[0], point.x()])
-                    ys.append([center[1], point.y()])
+                    xs.append([driver_seat_loc[0], point.x()])
+                    ys.append([driver_seat_loc[1], point.y()])
 
                     direct_line_of_sight = True
 
-            # Further check if the point is inside the front or rear view polygon
+            # Further check if the point is inside the front or rearview polygons
             # Define the inner polygon (to test if inside the outer)
             inner = ShapelyPolygon([(point.x(), point.y()) for point in points])
-            # Check if inner is completely inside outer
-            not_in_blind_stop = inner.within(front_view_pol) or inner.within(rear_view_pol)
+            # Check if inner intersects the rear fov
+            in_rear_fov = (inner.intersects(passenger_poly) or inner.intersects(driver_poly)
+                           or inner.intersects(rear_poly))
+            # Check if inner intersects with front fov
+            in_front_fov = inner.intersects(front_view_pol)
 
-            if not_in_blind_stop and direct_line_of_sight:
-                x_all_visible.append([int(x[0]) for x in bb_box.xy[:, 0:1]])
-                y_all_visible.append([int(y[0]) for y in bb_box.xy[:, 1:2]])
-                visible_bboxes.append(bb_box)
+            if in_rear_fov and direct_line_of_sight:
+                x_rear_fov.append([int(x[0]) for x in bb_box.xy[:, 0:1]])
+                y_rear_fov.append([int(y[0]) for y in bb_box.xy[:, 1:2]])
+                visible_rear_bboxes.append(bb_box)
+            elif in_front_fov and direct_line_of_sight:
+                x_front_fov.append([int(x[0]) for x in bb_box.xy[:, 0:1]])
+                y_front_fov.append([int(y[0]) for y in bb_box.xy[:, 1:2]])
+                visible_front_bboxes.append(bb_box)
             else:
-                x_all_hidden.append([int(x[0]) for x in bb_box.xy[:, 0:1]])
-                y_all_hidden.append([int(y[0]) for y in bb_box.xy[:, 1:2]])
+                x_hidden.append([int(x[0]) for x in bb_box.xy[:, 0:1]])
+                y_hidden.append([int(y[0]) for y in bb_box.xy[:, 1:2]])
                 hidden_bboxes.append(bb_box)
 
         # Saving data into a dataframe with columns: recordingId, trackId, adjacentTrackId, frame, visibility
         visibility_data = []
-        for bb_box in visible_bboxes:
+        for bb_box in visible_rear_bboxes:
             visibility_data.append({
                 "recordingId": self.recording_meta["recordingId"],
                 "trackId": track_id,
                 "adjacentTrackId": bb_box.track_id,
                 "frame": self.current_frame,
-                "visibility": True
+                "visibility": True,
+                "located": "REAR"
+            })
+
+        for bb_box in visible_front_bboxes:
+            visibility_data.append({
+                "recordingId": self.recording_meta["recordingId"],
+                "trackId": track_id,
+                "adjacentTrackId": bb_box.track_id,
+                "frame": self.current_frame,
+                "visibility": True,
+                "located": "FRONT"
             })
 
         for bb_box in hidden_bboxes:
@@ -715,23 +794,31 @@ class TrackVisualizer(object):
                 "trackId": track_id,
                 "adjacentTrackId": bb_box.track_id,
                 "frame": self.current_frame,
-                "visibility": False
+                "visibility": False,
+                "located": "NA"
             })
 
         return {
-            'x_all_visible': x_all_visible,
-            'y_all_visible': y_all_visible,
-            'x_all_hidden': x_all_hidden,
-            'y_all_hidden': y_all_hidden,
-            'x_block_all': x_block_all,
-            'y_block_all': y_block_all,
+            'x_front_fov': x_front_fov,
+            'y_front_fov': y_front_fov,
+            'x_rear_fov': x_rear_fov,
+            'y_rear_fov': y_rear_fov,
+            'x_hidden': x_hidden,
+            'y_hidden': y_hidden,
+            'x_block': x_block,
+            'y_block': y_block,
             'wall_x': wall_x,
             'wall_y': wall_y,
             'front_view_x': front_view_x,
             'front_view_y': front_view_y,
-            'rear_view_x': rear_view_x,
-            'rear_view_y': rear_view_y,
-            'center': center,
+            'rear_view_x': rear_poly.exterior.xy[0],
+            'rear_view_y': rear_poly.exterior.xy[1],
+            'passenger_mirror_view_x': passenger_poly.exterior.xy[0],
+            'passenger_mirror_view_y': passenger_poly.exterior.xy[1],
+            'driver_mirror_view_x': driver_poly.exterior.xy[0],
+            'driver_mirror_view_y': driver_poly.exterior.xy[1],
+            'center': driver_seat_loc,
+            'ego_car': ego_bbox,
             'visibility_data': visibility_data,
         }
 
@@ -766,27 +853,33 @@ class TrackVisualizer(object):
         ax.plot(visibility_data['wall_x'], visibility_data['wall_y'], 'black')
 
         # Plot the visibility cone of the observer
-        ax.plot(visibility_data['front_view_x'], visibility_data['front_view_y'])
-        ax.plot(visibility_data['rear_view_x'], visibility_data['rear_view_y'])
+        ax.plot(visibility_data['front_view_x'], visibility_data['front_view_y'], 'c')
+        ax.plot(visibility_data['rear_view_x'], visibility_data['rear_view_y'], 'm')
+        ax.plot(visibility_data['passenger_mirror_view_x'], visibility_data['passenger_mirror_view_y'], 'g')
+        ax.plot(visibility_data['driver_mirror_view_x'], visibility_data['driver_mirror_view_y'], 'b')
 
         # # plot connecting obervers and direct line of sight to the picked polygon
-        # for x, y in zip(xs, ys):
-        #     ax.plot(x, y, 'b', label='Visibility Polygon')
+        ego_car = visibility_data['ego_car']
+        ax.plot(np.array([[int(xy[0])] for xy in ego_car.xy]), [[int(xy[1])] for xy in ego_car.xy], 'orange', label='Visibility Polygon')
 
         # Plot the position of the observer with a green dot ('go')
         ax.plot([visibility_data['center'][0]], [visibility_data['center'][1]], 'go')
 
-        # Plot the visible object polygon with red color
-        for x, y in zip(visibility_data['x_all_visible'], visibility_data['y_all_visible']):
-            ax.plot(x, y, 'r')
+        # Plot the visible object on front fov polygon with black color
+        for x, y in zip(visibility_data['x_front_fov'], visibility_data['y_front_fov']):
+            ax.plot(x, y, 'black')
+
+        # Plot the visible object polygon with yellow color
+        for x, y in zip(visibility_data['x_rear_fov'], visibility_data['y_rear_fov']):
+            ax.plot(x, y, 'yellow')
 
         # Plot the hidden object polygon with blue color
-        for x, y in zip(visibility_data['x_all_hidden'], visibility_data['y_all_hidden']):
-            ax.plot(x, y, 'b')
+        for x, y in zip(visibility_data['x_hidden'], visibility_data['y_hidden']):
+            ax.plot(x, y, 'green')
 
         # Plot the fixed blocks polygon with yellow color
-        for x, y in zip(visibility_data['x_block_all'], visibility_data['y_block_all']):
-            ax.plot(x, y, 'y')
+        for x, y in zip(visibility_data['x_block'], visibility_data['y_block']):
+            ax.plot(x, y, 'r')
 
         plt.show()
 

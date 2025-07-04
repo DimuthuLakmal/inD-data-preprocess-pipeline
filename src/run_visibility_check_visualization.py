@@ -4,6 +4,7 @@ import sys
 
 from loguru import logger
 
+from src.dataset.data_loader import TrackDataset
 from visibility_checker import TrackVisualizer, DataError
 from tracks_import import read_from_csv
 
@@ -64,6 +65,9 @@ def create_args():
     cs.add_argument('--csv_file', default="../data/visibility_data.csv",
                     help="File that saves the visibility data",
                     type=str)
+    cs.add_argument('--history_length', default="20",
+                    help="Number of previous timesetps that includes in the historical observations of a data entry",
+                    type=int)
 
     return vars(cs.parse_args())
 
@@ -87,6 +91,7 @@ def main():
     tracks_meta_file = dataset_dir + recording + "_tracksMeta.csv"
     recording_meta_file = dataset_dir + recording + "_recordingMeta.csv"
     fixed_blocks_meta_file = dataset_dir + recording + "_fixedBlocks.csv"
+    visibility_file = dataset_dir + "visibility_data.csv"
 
     # Load csv files
     logger.info("Loading csv files {}, {} and {}", tracks_file, tracks_meta_file, recording_meta_file)
@@ -94,7 +99,8 @@ def main():
                                                    fixed_blocks_meta_file, include_px_coordinates=True)
 
     # Load background image for visualization
-    background_image_path = dataset_dir + recording + "_background.png"
+    # background_image_path = dataset_dir + recording + "_background.png"
+    background_image_path = dataset_dir + "semantic_maps/" + recording + "_background.png"
     if not os.path.exists(background_image_path):
         logger.warning("Background image {} missing. Fallback to using a black background.", background_image_path)
         background_image_path = None
@@ -102,9 +108,14 @@ def main():
 
     try:
         visualization_plot = TrackVisualizer(config, tracks, static_info, meta_info, fixed_blocks_info, config["csv_file"])
-        visualization_plot.show()
+        visualization_plot.data_write()
+        # visualization_plot.show()
     except DataError:
         sys.exit(1)
+
+    # track_dataset = TrackDataset(config, visibility_file, recording_meta_file, tracks_meta_file, tracks_file, fixed_blocks_meta_file)
+    # for i, sample in enumerate(track_dataset):
+    #     print(i, sample)
 
 
 def str2bool(v):

@@ -28,7 +28,7 @@ def read_all_recordings_from_csv(base_path: str = "../data/") -> List[dict]:
 
 
 def read_from_csv(tracks_file: str, tracks_meta_file: str, recording_meta_file: str,
-                  fixed_blocks_meta_file: str, include_px_coordinates: bool=False) -> Tuple[List[dict], List[dict], List[dict]]:
+                  fixed_blocks_meta_file: str, include_px_coordinates: bool=False) -> Tuple[List[dict], List[dict], List[dict], List[dict]]:
     """
     This method reads tracks and meta data for a single recording from csv files
     :param tracks_file: Path of a tracks csv file
@@ -40,6 +40,7 @@ def read_from_csv(tracks_file: str, tracks_meta_file: str, recording_meta_file: 
     tracks_meta = read_tracks_meta(tracks_meta_file)
     tracks = read_tracks(tracks_file, recording_meta, include_px_coordinates)
     fixed_blocks = read_fixed_blocks(fixed_blocks_meta_file)
+    # fixed_blocks = None
     return tracks, tracks_meta, recording_meta, fixed_blocks
 
 

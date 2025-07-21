@@ -254,10 +254,13 @@ class TrackVisualizer(object):
         """
 
         while self.current_frame < self.maximum_frame:
+            # if self.current_frame < 26:
+            #     self.current_frame += 1
+            #     continue
 
             bb_boxes = []
+            print(self.current_frame)
             for track_idx in self.frame_to_track_idxs[self.current_frame]:
-                print(self.current_frame)
                 track = self.tracks[track_idx]
 
                 track_id = track["trackId"]
@@ -679,7 +682,7 @@ class TrackVisualizer(object):
         for i, bb_box in enumerate(self.bb_boxes[self.current_frame]):
             # sorted_xy = self._sort_polygon_clockwise(bb_box.xy)
             # bb_box.xy = np.array(sorted_xy)
-            print('id', i)
+            # print('id', i)
             if bb_box.track_id == track_id:
                 ego_points = np.array([[int(xy[0]), int(xy[1])] for xy in bb_box.xy[:-1]])
                 ego_bbox = bb_box

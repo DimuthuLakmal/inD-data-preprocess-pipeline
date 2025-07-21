@@ -110,29 +110,3 @@ def get_rear_fov_polygons(corners, heading_deg, fov_length=20.0, fov_angle_passe
     rear_poly = Polygon([RL_arr, RR_arr, RR_far, RL_far])
 
     return driver_poly, passenger_poly, rear_poly
-
-
-# # Example usage
-# corners = [(2, 1), (1, 2), (-1, 0), (0, -1)]  # unordered
-# heading_deg = 135  # facing +x direction
-#
-# driver, passenger, rear = get_rear_fov_polygons(corners, heading_deg)
-#
-# # Plot
-# fig, ax = plt.subplots()
-# vehicle_poly = Polygon(corners)
-# x, y = vehicle_poly.exterior.xy
-# ax.plot(x, y, 'k-', label='Vehicle')
-#
-# for poly, color, label in zip(
-#     [driver, passenger, rear],
-#     ['red', 'blue', 'green'],
-#     ['Driver Mirror', 'Passenger Mirror', 'Rear Mirror']):
-#     x, y = poly.exterior.xy
-#     ax.fill(x, y, alpha=0.5, color=color, label=label)
-#
-# ax.set_aspect('equal')
-# plt.legend()
-# plt.title("Rear View Fields of View")
-# plt.grid(True)
-# plt.show()

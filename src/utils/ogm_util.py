@@ -1,12 +1,11 @@
 from copy import deepcopy
 
 import numpy as np
-import cv2
 from shapely import LineString
-from shapely.geometry import Polygon, Point, box
+from shapely.geometry import Polygon
 import matplotlib.pyplot as plt
 
-from src.utils import get_driver_center
+from src.utils.utils import get_driver_center
 
 # ---- CONFIGURATION ----
 CELL_SIZE = 20
@@ -94,6 +93,13 @@ def create_OGM_ego(ego_pts, ego_heading, other_bbox, image, fixed_blocks):
                 if grid[r, c] == 0:  # only override if free
                     grid[r, c] = 0.5  # mark as occluded
 
+    # ---- VISUALIZATION ----
+    # _visualise(image, vehicle_polygons, driver_seat_loc, cell_polygons, grid)
+
+    return grid, grid_gt
+
+
+def _visualise(image, vehicle_polygons, driver_seat_loc, cell_polygons, grid):
     # ---- VISUALIZE ----
     height, width = image.shape[:2]
     fig, ax = plt.subplots(figsize=(6, 6))
@@ -122,5 +128,3 @@ def create_OGM_ego(ego_pts, ego_heading, other_bbox, image, fixed_blocks):
     plt.title("Occupancy Grid Map")
     plt.legend()
     plt.show()
-
-    return grid, grid_gt

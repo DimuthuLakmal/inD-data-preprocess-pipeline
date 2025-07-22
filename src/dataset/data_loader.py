@@ -1,4 +1,3 @@
-import math
 import random
 from copy import deepcopy
 
@@ -7,7 +6,7 @@ import torch
 from torch.utils.data import Dataset
 
 from src.track_visualizer import DataError
-from src.tracks_import import read_from_csv
+from src.utils.tracks_import import read_from_csv
 
 matplotlib.use('qt5agg')
 

@@ -4,8 +4,8 @@ from copy import deepcopy
 import torch
 from torch.utils.data import Dataset
 
-from src.ogm_util import create_OGM_ego
-from src.tracks_import import read_from_csv
+from src.utils.ogm_util import create_OGM_ego
+from src.utils.tracks_import import read_from_csv
 
 import json
 import sys
@@ -83,6 +83,7 @@ class TrackDataset(Dataset):
         self.input_path = config["dataset_dir"]
         self.dataset = config["dataset"].lower()
         self.history_length = config["history_length"]
+        self.num_features = 7  # x, y, heading, xVelocity, yVelocity, xAcceleration, yAcceleration
 
         # Load dataset specific visualization parameters from file
         dataset_params_path = Path(config["visualizer_params_dir"]) / "visualizer_params.json"
@@ -181,29 +182,63 @@ class TrackDataset(Dataset):
                                           & (self.tracks_meta["recordingId"] == scene_id)].iloc[0].to_dict()
 
         # iterate through all the historical frames upto the current_frame
-        historical_obs = []
-        for t in range(current_frame - self.history_length, current_frame):
-            map = deepcopy(self.background_images[scene_id])
+        historical_adjacent_obs, historical_ego_obs, map_obs = {}, [], []
+
+        backgrond_img = self.background_images[scene_id]
+        starting_frame = current_frame - self.history_length
+        for t in range(starting_frame, current_frame): # T, N, D
+            map = deepcopy(backgrond_img)
             visible_track_ids = list(self.visibility_data[(self.visibility_data["trackId"] == ego_vehicle_track_idx)
                                                           & (self.visibility_data["frame"] == t)
                                                           & (self.visibility_data["visibility"] == True)
                                                           & (self.visibility_data["recordingId"] == scene_id)]
                                      ["adjacentTrackId"].drop_duplicates())
 
+            # Extract historical observations for visible tracks
+            recorded_tack_ids = []
             for track_idx in visible_track_ids:
                 track = self.tracks[(self.tracks["trackId"] == track_idx)
                                     & (self.tracks["recordingId"] == scene_id)].iloc[0].to_dict()
                 track_meta = self.tracks_meta[(self.tracks_meta["trackId"] == track_idx)
                                               & (self.tracks_meta["recordingId"] == scene_id)].iloc[0].to_dict()
 
-                pts = self._create_polygon(track, track_meta, t)
-                cv2.fillPoly(map, [pts], (150, 150, 50)) #150, 100, 150
+                track_info = self._extract_tack_info(track, track_meta, t, backgrond_img.shape)
+                cv2.fillPoly(map, [track_info["pts"]], (150, 150, 50)) #150, 100, 150
 
-            pts = self._create_polygon(ego_track, ego_track_meta, t)
-            cv2.fillPoly(map, [pts], (255, 180, 200))
+                track_data = np.array([track_info["center"][0], track_info["center"][1], track_info["heading"],
+                                       track_info["xVelocity"], track_info["yVelocity"], track_info["xAcceleration"],
+                                       track_info["yAcceleration"]])
+
+                if track_idx not in historical_adjacent_obs.keys():
+                    if t > starting_frame:
+                        # This object appeared lately. So have to add nulls/empty/zeros for previous frames
+                        historical_adjacent_obs[track_idx] = [[0] * self.num_features for _ in range(starting_frame, t)]
+                        historical_adjacent_obs[track_idx].append(track_data)
+                    else:
+                        historical_adjacent_obs[track_idx] = [track_data]
+                else:
+                    historical_adjacent_obs[track_idx].append(track_data)
+
+                recorded_tack_ids.append(track_idx)
+
+            # Fill the historical observations with zeros for the tracks that are not visible in the current frame
+            for track_idx in historical_adjacent_obs.keys():
+                if track_idx not in recorded_tack_ids:
+                    historical_adjacent_obs[track_idx].append([0])
+
+            # Extract historical observations for the ego vehicle
+            track_info = self._extract_tack_info(ego_track, ego_track_meta, t, backgrond_img.shape)
+            cv2.fillPoly(map, [track_info["pts"]], (255, 180, 200))
+            historical_ego_obs.append(np.array([track_info["center"][0],
+                                                track_info["center"][1],
+                                                track_info["heading"],
+                                                track_info["xVelocity"],
+                                                track_info["yVelocity"],
+                                                track_info["xAcceleration"],
+                                                track_info["yAcceleration"]]))
 
             map_resized = cv2.resize(map, (224, 224), interpolation=cv2.INTER_AREA)
-            historical_obs.append(map_resized)
+            map_obs.append(map_resized)
 
             # cv2.imshow('Image with Polygon', map_resized)
 
@@ -221,15 +256,15 @@ class TrackDataset(Dataset):
         hidden_tracks["existsInFrame"] = hidden_tracks["frame"].apply(lambda x: current_frame in x)
         hidden_tracks = hidden_tracks[hidden_tracks["existsInFrame"]].to_dict('records')
 
-        pts_ego = self._create_polygon(ego_track, ego_track_meta, current_frame)
+        pts_ego = self._extract_tack_info(ego_track, ego_track_meta, current_frame, backgrond_img.shape)["pts"]
         heading_ego = self._get_heading(ego_track, ego_track_meta, current_frame)
-        cv2.fillPoly(self.background_images[scene_id], [pts_ego], (0, 255, 0))
+        cv2.fillPoly(backgrond_img, [pts_ego], (0, 255, 0))
         for h in hidden_tracks:
             hidden_track_meta = self.tracks_meta[(self.tracks_meta["trackId"] == h["trackId"])
                                                  & (self.tracks_meta["recordingId"] == scene_id)].iloc[0].to_dict()
 
-            pts_hidden = self._create_polygon(h, hidden_track_meta, current_frame)
-            cv2.fillPoly(self.background_images[scene_id], [pts_hidden], (255, 255, 0))
+            pts_hidden = self._extract_tack_info(h, hidden_track_meta, current_frame, backgrond_img.shape)["pts"]
+            cv2.fillPoly(backgrond_img, [pts_hidden], (255, 255, 0))
 
         # Create OGM
         visible_track_idx = list(self.visibility_data[(self.visibility_data["frame"] == current_frame)
@@ -244,21 +279,21 @@ class TrackDataset(Dataset):
         for track in visible_tracks:
             track_meta = self.tracks_meta[(self.tracks_meta["trackId"] == track["trackId"])
                                           & (self.tracks_meta["recordingId"] == scene_id)].iloc[0].to_dict()
-            pts = self._create_polygon(track, track_meta, current_frame).squeeze()
+            pts = self._extract_tack_info(track, track_meta, current_frame, backgrond_img.shape)["pts"].squeeze()
             visible_pts.append(pts)
 
-            cv2.fillPoly(self.background_images[scene_id], [pts], (0, 255, 255))
+            cv2.fillPoly(backgrond_img, [pts], (0, 255, 255))
 
-        cv2.imshow('Image with Polygon', self.background_images[scene_id])
+        # cv2.imshow('Image with Polygon', backgrond_img)
 
-        ogm, ogm_gt = create_OGM_ego(pts_ego.squeeze(), heading_ego, visible_pts, self.background_images[scene_id], self.fixed_blocks_info[scene_id])
+        ogm, ogm_gt = create_OGM_ego(pts_ego.squeeze(), heading_ego, visible_pts, backgrond_img, self.fixed_blocks_info[scene_id])
 
-        return (historical_obs, hidden_tracks)
+        return (historical_adjacent_obs, historical_ego_obs, map_obs, ogm, ogm_gt)
 
-    def _create_polygon(self, track, track_meta, t: int) -> np.ndarray:
+    def _extract_tack_info(self, track, track_meta, t: int, width_height: tuple) -> dict:
         current_index = self._get_current_index(track_meta, t)
         if current_index < 0:
-            return None
+            return {}
 
         object_class = track_meta["class"]
         if track["bboxVis"] is not None:
@@ -287,7 +322,25 @@ class TrackDataset(Dataset):
             # pts = bounding_box.astype(int)
             pts = pts.reshape((-1, 1, 2))
 
-        return pts
+        heading = track['heading'][current_index]
+        x_velocity = track["xVelocity"][current_index]
+        y_velocity = track["yVelocity"][current_index]
+        x_acceleration = track["xAcceleration"][current_index]
+        y_acceleration = track["yAcceleration"][current_index]
+
+        # Normalize the center point to the range [0, 1]
+        center_point = [center_point[0] / width_height[0], center_point[1] / width_height[1]]
+
+        return {
+            "pts": pts,
+            "center": center_point,
+            "object_class": object_class,
+            "heading": heading,
+            "xVelocity": x_velocity,
+            "yVelocity": y_velocity,
+            "xAcceleration": x_acceleration,
+            "yAcceleration": y_acceleration
+        }
 
     def _get_current_index(self, track_meta, t: int) -> int:
         initial_frame = track_meta["initialFrame"]

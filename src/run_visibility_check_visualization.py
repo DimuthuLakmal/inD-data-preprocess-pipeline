@@ -4,9 +4,8 @@ import sys
 
 from loguru import logger
 
-from src.dataset.data_loader2 import TrackDataset
 from visibility_checker import TrackVisualizer, DataError
-from tracks_import import read_from_csv
+from src.utils.tracks_import import read_from_csv
 
 
 def create_args():

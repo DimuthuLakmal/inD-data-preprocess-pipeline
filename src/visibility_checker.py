@@ -254,7 +254,7 @@ class TrackVisualizer(object):
         """
 
         while self.current_frame < self.maximum_frame:
-            # if self.current_frame < 26:
+            # if self.current_frame < 21851:
             #     self.current_frame += 1
             #     continue
 
@@ -296,11 +296,7 @@ class TrackVisualizer(object):
                 # Make bbox clickable to open track info window
                 bbox.track_id = track["trackId"]
 
-                self.ax.add_patch(bbox)
                 bb_boxes.append(bbox)
-
-            if self.current_frame not in self.bb_boxes.keys():
-                self.bb_boxes[self.current_frame] = bb_boxes
 
             # Check the visibility of each track and save the visibility data into a dataframe
             if self.current_frame not in self.frames_written:
@@ -312,7 +308,7 @@ class TrackVisualizer(object):
 
                     if track_meta["class"] == "car" or track_meta["class"] == "truck_bus":
                         # Check visibility of the track
-                        data = self._find_visibility(track_id)
+                        data = self._find_visibility(bb_boxes, track_id)
                         visibility_data = data['visibility_data']
 
                         chunk_df = pd.DataFrame(visibility_data)
@@ -653,7 +649,11 @@ class TrackVisualizer(object):
         return sorted_xy
 
 
-    def _find_visibility(self, track_id):
+    def _find_visibility(self, all_bb_boxes, track_id):
+
+        if all_bb_boxes == None:
+            all_bb_boxes = self.bb_boxes[self.current_frame]
+
         epsilon = 0.0000001
 
         # Define the points which will be the outer boundary of the environment
@@ -679,7 +679,7 @@ class TrackVisualizer(object):
         ego_bbox = None
         type = None
 
-        for i, bb_box in enumerate(self.bb_boxes[self.current_frame]):
+        for i, bb_box in enumerate(all_bb_boxes):
             # sorted_xy = self._sort_polygon_clockwise(bb_box.xy)
             # bb_box.xy = np.array(sorted_xy)
             # print('id', i)
@@ -732,7 +732,8 @@ class TrackVisualizer(object):
         driver_poly, passenger_poly, rear_poly = get_rear_fov_polygons(ego_points, heading, fov_length=self.image_width, type=type)
 
         # Check all other bounding boxes for visibility
-        visible_front_bboxes, visible_rear_bboxes, hidden_bboxes = [], [],  []
+        visible_front_bboxes, visible_rear_bboxes = [], []
+        hidden_front_bboxes, hidden_back_bboxes = [], []
         x_rear_fov, x_front_fov, x_hidden = [], [], []
         y_rear_fov, y_front_fov, y_hidden = [], [], []
         for bb_box in other_bboxes:
@@ -767,7 +768,14 @@ class TrackVisualizer(object):
             else:
                 x_hidden.append([int(x[0]) for x in bb_box.xy[:, 0:1]])
                 y_hidden.append([int(y[0]) for y in bb_box.xy[:, 1:2]])
-                hidden_bboxes.append(bb_box)
+
+                if in_front_fov:
+                    hidden_front_bboxes.append(bb_box)
+                else:
+                    hidden_back_bboxes.append(bb_box)
+
+                # Decide if the object located in the rear or front
+
 
         # Saving data into a dataframe with columns: recordingId, trackId, adjacentTrackId, frame, visibility
         visibility_data = []
@@ -791,14 +799,24 @@ class TrackVisualizer(object):
                 "located": "FRONT"
             })
 
-        for bb_box in hidden_bboxes:
+        for bb_box in hidden_front_bboxes:
             visibility_data.append({
                 "recordingId": self.recording_meta["recordingId"],
                 "trackId": track_id,
                 "adjacentTrackId": bb_box.track_id,
                 "frame": self.current_frame,
                 "visibility": False,
-                "located": "NA"
+                "located": "FRONT"
+            })
+
+        for bb_box in hidden_back_bboxes:
+            visibility_data.append({
+                "recordingId": self.recording_meta["recordingId"],
+                "trackId": track_id,
+                "adjacentTrackId": bb_box.track_id,
+                "frame": self.current_frame,
+                "visibility": False,
+                "located": "REAR"
             })
 
         return {
@@ -838,7 +856,7 @@ class TrackVisualizer(object):
             return
         track_id = artist.track_id
 
-        visibility_data = self._find_visibility(track_id)
+        visibility_data = self._find_visibility(None, track_id)
 
         # adding map in the background of the plot
         self.ax.imshow(self.background_image)

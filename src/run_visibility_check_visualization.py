@@ -74,7 +74,7 @@ def main():
     dataset_dir = config["dataset_dir"] + "/"
     recording = config["recording"]
 
-    for recording in range(21, 22):
+    for recording in range(30, 33):
         if recording is None:
             logger.error("Please specify a recording!")
             sys.exit(1)

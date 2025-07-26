@@ -39,8 +39,10 @@ def read_from_csv(tracks_file: str, tracks_meta_file: str, recording_meta_file: 
     recording_meta = read_recording_meta(recording_meta_file)
     tracks_meta = read_tracks_meta(tracks_meta_file)
     tracks = read_tracks(tracks_file, recording_meta, include_px_coordinates)
-    fixed_blocks = read_fixed_blocks(fixed_blocks_meta_file)
-    # fixed_blocks = None
+    if fixed_blocks_meta_file is not None:
+        fixed_blocks = read_fixed_blocks(fixed_blocks_meta_file)
+    else:
+        fixed_blocks = None
     return tracks, tracks_meta, recording_meta, fixed_blocks
 
 

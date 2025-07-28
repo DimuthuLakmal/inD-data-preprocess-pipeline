@@ -12,7 +12,7 @@ CELL_SIZE = 20
 GRID_ROWS = GRID_COLS = 20  # 20x20 grid
 
 
-def create_OGM_ego(ego_pts, ego_heading, other_bbox, image, fixed_blocks):
+def create_OGM_ego(ego_pts, ego_heading, visible_bbox, hidden_bbox, image, fixed_blocks):
     driver_seat_loc = get_driver_center(ego_pts, ego_heading)
 
     # Example ego position (in pixel coordinates)
@@ -22,7 +22,8 @@ def create_OGM_ego(ego_pts, ego_heading, other_bbox, image, fixed_blocks):
 
     ego_heading_rad = np.deg2rad(-1 * ego_heading)
 
-    vehicle_polygons = [Polygon(bbox) for bbox in other_bbox]  # list of polygons for other vehicles
+    visible_vehicle_polygons = [Polygon(bbox) for bbox in visible_bbox]  # list of polygons for other vehicles
+    hidden_vehicle_polygons = [Polygon(bbox) for bbox in hidden_bbox]  # list of polygons for other vehicles
     fixed_blocks_polygons = [Polygon(bbox) for bbox in fixed_blocks]  # list of polygons for other vehicles
 
     # prepare transformation
@@ -62,7 +63,7 @@ def create_OGM_ego(ego_pts, ego_heading, other_bbox, image, fixed_blocks):
 
             cell_polygons[r][c] = Polygon(corners_global)
 
-    occupied_polygons = (vehicle_polygons + fixed_blocks_polygons)
+    occupied_polygons = (visible_vehicle_polygons + fixed_blocks_polygons)
 
     # ---- OCCUPANCY TEST ----
     for r in range(GRID_ROWS):
@@ -75,6 +76,8 @@ def create_OGM_ego(ego_pts, ego_heading, other_bbox, image, fixed_blocks):
             else:
                 grid[r, c] = 0  # free
 
+    grid_gt = deepcopy(grid)  # keep ground truth for occlusion detection
+
     # ---- VISIBILITY TEST ----
     # simple line-of-sight: if a cell center has line blocked by vehicles → occluded
     def is_visible(cell_center, ego_pos, occupied_polygons):
@@ -84,8 +87,6 @@ def create_OGM_ego(ego_pts, ego_heading, other_bbox, image, fixed_blocks):
                 return False
         return True
 
-    grid_gt = deepcopy(grid)  # keep ground truth for occlusion detection
-
     for r in range(GRID_ROWS):
         for c in range(GRID_COLS):
             cx, cy = cell_polygons[r][c].centroid.coords[0]
@@ -93,8 +94,19 @@ def create_OGM_ego(ego_pts, ego_heading, other_bbox, image, fixed_blocks):
                 if grid[r, c] == 0:  # only override if free
                     grid[r, c] = 0.5  # mark as occluded
 
+
+    # ---- FURTHER OCCUPANCY TEST FOR HIDDEN VEHICLES IN GT----
+    for r in range(GRID_ROWS):
+        for c in range(GRID_COLS):
+            cell = cell_polygons[r][c]
+            for poly in hidden_vehicle_polygons:
+                if cell.intersects(poly):
+                    grid_gt[r, c] = 1  # occupied
+                    break
+
     # ---- VISUALIZATION ----
-    # _visualise(image, vehicle_polygons, driver_seat_loc, cell_polygons, grid)
+    # _visualise(image, visible_vehicle_polygons, driver_seat_loc, cell_polygons, grid)
+    # _visualise(image, visible_vehicle_polygons + hidden_vehicle_polygons, driver_seat_loc, cell_polygons, grid_gt)
 
     return grid, grid_gt
 

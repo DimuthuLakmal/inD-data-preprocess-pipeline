@@ -14,7 +14,7 @@ class OGMDataLoader():
             print(i, sample)
 
         dataloader = DataLoader(dataset=dataset,
-                                batch_size=self.cfg.TRAIN.BATCH_SIZE if self.phase == 'train' else self.cfg.TEST.BATCH_SIZE,
+                                batch_size=self.cfg['batch_size'],
                                 shuffle=(self.phase == 'train'),
                                 num_workers=self.cfg.TRAIN.WORKERS_NUM)
         return dataloader

@@ -45,8 +45,8 @@ class OGMDataset(Dataset):
 
         for scene_id in scene_ids:
 
-            if int(scene_id) > 1:
-                break
+            if int(scene_id) < 11:
+                continue
 
             tracks_file = os.path.join(self.input_path, f"{scene_id}_tracks.csv")
             tracks_meta_file = os.path.join(self.input_path, f"{scene_id}_tracksMeta.csv")
@@ -101,15 +101,15 @@ class OGMDataset(Dataset):
 
         self.data_dict = {}
         # Check index file saved into a file
-        index_file_path = Path(os.path.join(self.input_path, "index_map.pkl"))
+        index_file_path = Path(os.path.join(self.input_path, "index_map2.pkl"))
         if index_file_path.exists():
             logger.info("Loading index map from {}", index_file_path)
             self.data_dict = pickle.load(open(index_file_path, "rb"))
         else:
             for scene_id in scene_ids:
                 scene_id = int(scene_id)
-                if scene_id > 10:
-                    break
+                if scene_id < 11:
+                    continue
 
                 tracks_meta = self.tracks_meta[(self.tracks_meta["recordingId"] == scene_id)]
                 visibility_data = self.visibility_data[(self.visibility_data["recordingId"] == scene_id)]

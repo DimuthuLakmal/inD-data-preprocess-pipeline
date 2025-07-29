@@ -1,5 +1,7 @@
 import argparse
 
+import yaml
+
 from src.dataset.data_loader import OGMDataLoader
 from src.models.transformer.graph_weight_encoder import GraphWeightEncoder
 
@@ -26,8 +28,11 @@ def train(model, data_loader):
 
 
 if __name__ == '__main__':
-    config = create_args()
-    train_dataloader = OGMDataLoader(config, phase='train').create_dataloader()
+    with open("../configs/config.yaml", "r") as stream:
+        config = yaml.safe_load(stream)
+        config['data']['batch_size'] = config['model']['train_batch_size']
+
+    train_dataloader = OGMDataLoader(config['data'], phase='train').create_dataloader()
 
     model = GraphWeightEncoder().to(config["device"])
     train(model, None)

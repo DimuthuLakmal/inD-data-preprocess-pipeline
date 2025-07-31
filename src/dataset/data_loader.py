@@ -1,5 +1,6 @@
 from torch.utils.data import DataLoader
 
+from src.dataset.collate_fn import custom_collate
 from src.dataset.dataset import OGMDataset
 
 
@@ -10,11 +11,12 @@ class OGMDataLoader():
 
     def create_dataloader(self):
         dataset = OGMDataset(self.cfg)
-        for i, sample in enumerate(dataset):
-            print(i, sample)
+        # for i, sample in enumerate(dataset):
+        #     print(i, sample)
 
         dataloader = DataLoader(dataset=dataset,
                                 batch_size=self.cfg['batch_size'],
                                 shuffle=(self.phase == 'train'),
-                                num_workers=self.cfg.TRAIN.WORKERS_NUM)
+                                collate_fn=custom_collate,
+                                num_workers=self.cfg['num_workers'])
         return dataloader

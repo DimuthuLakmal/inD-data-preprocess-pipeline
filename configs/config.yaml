@@ -7,42 +7,14 @@ model:
   load_saved_model: False # if you want pre-trained model weights to be loaded
   model_input_path: "output/model/pems08/epoch_58_model.pt" # pretrained model path
   device: cuda # decides GPU or CPU for training
-  transformer:
-    encoder:
-      features: 2 # To indicates multiple encoders (feature-wise). default is 1. =2 when rep_vector is True
-      emb_dim: 16 # dimension that embedding layer maps the input of the model to.
-      seq_len: 36 # input sequence length
-      input_dim: 2 # input dimension, inputs is traffic flow value, in some dataset it may be combined with time index
-      n_layers: 8 # # of temporal encoder layers
-      local_trends: True # decides whether the temporal encoder apply convolution to distinguish local trends in time series data
-      graph_semantic_input: True # to enable semantics based graph
-      graph_input: True # to enable distance based graph
-      dropout_e_normal: 0.0 # dropout applied to the final output of temporal encoder layer of the first encoder
-      dropout_e_rep: 0.2 # dropout applied to the final output of temporal encoder layer of the second encoder (representative time sequence)
-      encoder_block: # temporal encoder layer configs
-        n_heads: 8
-        expansion_factor: 4
-        src_dropout: 0.2
-        ff_dropout: 0.2
-    decoder:
-      emb_dim: 64 # decoder input dimension
-      seq_len: 13 # decoder input sequence length
-      seq_offset: 1 # Indicates how many timesteps in the previous hour consider as inputs in the decoder
-      input_dim: 1  # input dimension
-      n_layers: 8 # # of temporal decoder layers
-      out_dim: 1 # output dimension (predicted traffic flow value)
-      out_start_idx: 0 # When set decoder offset, this indicates the start index of the decoder output to calculate loss
-      out_end_idx: -1 # When set decoder offset, this indicates the end index of the decoder output to calculate loss
-      per_enc_feature_len: 36 # used in decoder cross attention. This should be tuned along with cross_attn_features. This only works when # of encoder features=1. By default keep it equals to seq_length of encoder
-      local_trends: True # indicates to apply convolution to extract local trend information.
-      decoder_block: # temporal decoder layer configs
-        n_heads: 8
-        expansion_factor: 4
-        cross_attn_features: 2 # Used to indicates how many feature-wise cross attentions in the decoder. This value=2 when rep_vector is True. otherwise 1.
-        src_dropout: 0.2
-        cross_attn_dropout: [0.2, 0.3]
-        ff_dropout: 0.2
-    lookup_index: True # Use to inject weekly time index information of the input sequence to positional encoding
+  graph_weight_encoder:
+    dim_model: 32 # dimension that embedding layer maps the input of the model to.
+    seq_len: 20 # input sequence length
+    input_dim: 7 # input dimension, inputs is traffic flow value, in some dataset it may be combined with time index
+    num_layers: 4 # # of temporal encoder layers
+    num_heads: 8 # # of temporal encoder layers
+    dropout_e_normal: 0.0 # dropout applied to the final output of temporal encoder layer of the first encoder
+    dropout_e_rep: 0.2 # dropout applied to the final output of temporal encoder layer of the second encoder (representative time sequence)
 
 # Data Configs
 data:
@@ -50,3 +22,4 @@ data:
   dataset: "ind" # dataset name
   visualizer_params_dir: "../data/visualizer_params/"
   history_length: 20
+  num_workers: 1 # number of workers for data loading

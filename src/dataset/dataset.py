@@ -43,9 +43,12 @@ class OGMDataset(Dataset):
         self.fixed_blocks_info = {}
         self.frame_to_track_idxs = {}
 
+        start_scene = 0
+        end_scene = 2
+
         for scene_id in scene_ids:
 
-            if int(scene_id) < 11:
+            if int(scene_id) < start_scene or int(scene_id) > end_scene:
                 continue
 
             tracks_file = os.path.join(self.input_path, f"{scene_id}_tracks.csv")
@@ -101,14 +104,14 @@ class OGMDataset(Dataset):
 
         self.data_dict = {}
         # Check index file saved into a file
-        index_file_path = Path(os.path.join(self.input_path, "index_map2.pkl"))
+        index_file_path = Path(os.path.join(self.input_path, "index_map1.pkl"))
         if index_file_path.exists():
             logger.info("Loading index map from {}", index_file_path)
             self.data_dict = pickle.load(open(index_file_path, "rb"))
         else:
             for scene_id in scene_ids:
                 scene_id = int(scene_id)
-                if scene_id < 11:
+                if scene_id < start_scene or scene_id > end_scene:
                     continue
 
                 tracks_meta = self.tracks_meta[(self.tracks_meta["recordingId"] == scene_id)]
@@ -129,7 +132,7 @@ class OGMDataset(Dataset):
 
                 # We have to find out timesteps that have atleast one hidden record in the visiblity data.
                 # We cannot start from the minimum_frame as we have to include the history as well.
-                for i_frame in range(minimum_frame + self.history_length, maximum_frame + 1,
+                for i_frame in range(minimum_frame + self.history_length, 1000,
                                      (self.history_length * 2)):
 
                     hidden_objects = visibility_data[(visibility_data['frame'] == i_frame) &
@@ -188,8 +191,11 @@ class OGMDataset(Dataset):
                         "hidden_tracks_pts": hidden_tracks_pts
                     }
 
+                    print(str(scene_id) + '_' + str(i_frame) + '_' + str(ego_vehicle_track_idx))
+
             pickle.dump(self.data_dict, open(index_file_path, "wb"))
 
+        self.keys = list(self.data_dict.keys())
         print("Done Loading")
 
     def __len__(self):
@@ -199,7 +205,7 @@ class OGMDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        key = list(self.data_dict.keys())[idx]
+        key = self.keys[idx]
         keys = key.split("_")
         scene_id = int(keys[0])
         current_frame = int(keys[1])
@@ -229,123 +235,16 @@ class OGMDataset(Dataset):
         ogm, ogm_gt = create_OGM_ego(pts_ego.squeeze(), heading_ego, visible_tracks_pts, hidden_tracks_pts,
                                      gt_background_img, self.fixed_blocks_info[scene_id])
 
-        return (historical_adjacent_obs, historical_ego_obs, map_obs, ogm, ogm_gt, resized_map)
+        input = {
+            "historical_adjacent_obs": np.array(list(historical_adjacent_obs.values()), dtype=np.float32),
+            "historical_ego_obs": np.array(historical_ego_obs, dtype=np.float32),
+            # "map_obs": map_obs,
+            "ogm": ogm.astype(np.float32),
+        }
+        target = ogm_gt.astype(np.float32)
 
+        return input, target
 
-    def __getitem__2(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-
-        key = list(self.data_dict.keys())[idx]
-        scene_id = int(key.split("_")[0])
-        current_frame = int(key.split("_")[1])
-
-        ego_vehicle_track_idx = self.data_dict[key]
-        ego_track = self.tracks[(self.tracks["trackId"] == ego_vehicle_track_idx)
-                                & (self.tracks["recordingId"] == scene_id)].iloc[0].to_dict()
-        ego_track_meta = self.tracks_meta[(self.tracks_meta["trackId"] == ego_vehicle_track_idx)
-                                          & (self.tracks_meta["recordingId"] == scene_id)].iloc[0].to_dict()
-
-        # iterate through all the historical frames upto the current_frame
-        historical_adjacent_obs, historical_ego_obs, map_obs = {}, [], []
-
-        backgrond_img = self.background_images[scene_id]
-        starting_frame = current_frame - self.history_length
-        for t in range(starting_frame, current_frame):  # T, N, D
-            map = deepcopy(backgrond_img)
-            visible_track_ids = list(self.visibility_data[(self.visibility_data["trackId"] == ego_vehicle_track_idx)
-                                                          & (self.visibility_data["frame"] == t)
-                                                          & (self.visibility_data["visibility"] == True)
-                                                          & (self.visibility_data["recordingId"] == scene_id)
-                                                          & (self.visibility_data["located"] == 'FRONT')]
-                                     ["adjacentTrackId"].drop_duplicates())
-
-            # Extract historical observations for visible tracks
-            recorded_tack_ids = []
-            for track_idx in visible_track_ids:
-                track = self.tracks[(self.tracks["trackId"] == track_idx)
-                                    & (self.tracks["recordingId"] == scene_id)].iloc[0].to_dict()
-                track_meta = self.tracks_meta[(self.tracks_meta["trackId"] == track_idx)
-                                              & (self.tracks_meta["recordingId"] == scene_id)].iloc[0].to_dict()
-
-                track_info = self._extract_track_info(track, track_meta, t, backgrond_img.shape)
-                cv2.fillPoly(map, [track_info["pts"]], (150, 150, 50))  #150, 100, 150
-
-                track_data = np.array([track_info["center"][0], track_info["center"][1], track_info["heading"],
-                                       track_info["xVelocity"], track_info["yVelocity"], track_info["xAcceleration"],
-                                       track_info["yAcceleration"]])
-
-                if track_idx not in historical_adjacent_obs.keys():
-                    if t > starting_frame:
-                        # This object appeared lately. So have to add nulls/empty/zeros for previous frames
-                        historical_adjacent_obs[track_idx] = [[0] * self.num_features for _ in range(starting_frame, t)]
-                        historical_adjacent_obs[track_idx].append(track_data)
-                    else:
-                        historical_adjacent_obs[track_idx] = [track_data]
-                else:
-                    historical_adjacent_obs[track_idx].append(track_data)
-
-                recorded_tack_ids.append(track_idx)
-
-            # Fill the historical observations with zeros for the tracks that are not visible in the current frame
-            for track_idx in historical_adjacent_obs.keys():
-                if track_idx not in recorded_tack_ids:
-                    historical_adjacent_obs[track_idx].append([0])
-
-            # Extract historical observations for the ego vehicle
-            track_info = self._extract_track_info(ego_track, ego_track_meta, t, backgrond_img.shape)
-            cv2.fillPoly(map, [track_info["pts"]], (255, 180, 200))
-            historical_ego_obs.append(np.array([track_info["center"][0],
-                                                track_info["center"][1],
-                                                track_info["heading"],
-                                                track_info["xVelocity"],
-                                                track_info["yVelocity"],
-                                                track_info["xAcceleration"],
-                                                track_info["yAcceleration"]]))
-
-            map_resized = cv2.resize(map, (224, 224), interpolation=cv2.INTER_AREA)
-            map_obs.append(map_resized)
-
-        # cv2.imwrite("history.png", map)
-
-        # Extract Ground Truth
-        pts_ego = self._extract_track_info(ego_track, ego_track_meta, current_frame, backgrond_img.shape)["pts"]
-        heading_ego = self._get_heading(ego_track, ego_track_meta, current_frame)
-
-        gt_background_img = deepcopy(backgrond_img)
-
-        # Create OGM
-        all_tracks_visibility_df = self.visibility_data[(self.visibility_data["frame"] == current_frame)
-                                                      & (self.visibility_data["trackId"] == ego_vehicle_track_idx)
-                                                      & (self.visibility_data["recordingId"] == scene_id)
-                                                      & (self.visibility_data["located"] == 'FRONT')]
-
-        all_track_idx = all_tracks_visibility_df["adjacentTrackId"].drop_duplicates().tolist()
-        visible_track_idx = (all_tracks_visibility_df[all_tracks_visibility_df["visibility"] == True]["adjacentTrackId"]
-                             .drop_duplicates().tolist())
-        all_tracks = self.tracks[(self.tracks["trackId"].isin(all_track_idx))
-                                     & (self.tracks["recordingId"] == scene_id)].to_dict('records')
-
-        visible_pts = []
-        hidden_tracks_pts = []
-        for track in all_tracks:
-            track_meta = self.tracks_meta[(self.tracks_meta["trackId"] == track["trackId"])
-                                          & (self.tracks_meta["recordingId"] == scene_id)].iloc[0].to_dict()
-            pts = self._extract_track_info(track, track_meta, current_frame, backgrond_img.shape)["pts"].squeeze()
-
-            if track["trackId"] in visible_track_idx:
-                visible_pts.append(pts)
-            else:
-                hidden_tracks_pts.append(pts)
-
-            # cv2.fillPoly(backgrond_img, [pts], (0, 255, 255))
-
-        # cv2.imshow('Image with Polygon', backgrond_img)
-
-        ogm, ogm_gt = create_OGM_ego(pts_ego.squeeze(), heading_ego, visible_pts, hidden_tracks_pts, gt_background_img,
-                                     self.fixed_blocks_info[scene_id])
-
-        return (historical_adjacent_obs, historical_ego_obs, map_obs, ogm, ogm_gt)
 
     def _extract_track_info(self, track, track_meta, t: int, width_height: tuple) -> dict:
         current_index = self._get_current_index(track_meta, t)
@@ -450,7 +349,7 @@ class OGMDataset(Dataset):
                 if track_idx not in historical_adjacent_obs.keys():
                     if t > starting_frame:
                         # This object appeared lately. So have to add nulls/empty/zeros for previous frames
-                        historical_adjacent_obs[track_idx] = [[0] * self.num_features for _ in range(starting_frame, t)]
+                        historical_adjacent_obs[track_idx] = [np.zeros(self.num_features) for _ in range(starting_frame, t)]
                         historical_adjacent_obs[track_idx].append(track_data)
                     else:
                         historical_adjacent_obs[track_idx] = [track_data]
@@ -462,7 +361,7 @@ class OGMDataset(Dataset):
             # Fill the historical observations with zeros for the tracks that are not visible in the current frame
             for track_idx in historical_adjacent_obs.keys():
                 if track_idx not in recorded_tack_ids:
-                    historical_adjacent_obs[track_idx].append([0])
+                    historical_adjacent_obs[track_idx].append(np.zeros(self.num_features))
 
             # Extract historical observations for the ego vehicle
             track_info = self._extract_track_info(ego_track, ego_track_meta, t, backgrond_img.shape)

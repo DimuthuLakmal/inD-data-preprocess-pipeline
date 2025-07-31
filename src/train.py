@@ -23,8 +23,22 @@ def create_args():
     return vars(cs.parse_args())
 
 
-def train(model, data_loader):
-    pass
+def train(model, data_loader, config):
+    model.train()
+    for epoch in range(config['model']['train_epochs']):  # Example: 10 epochs
+        for batch_idx, (inputs, target) in enumerate(data_loader):
+
+            targets = target.to(config['model']["device"])
+
+            outputs = model(inputs)
+            loss = model.loss(outputs, targets)
+
+            model.optimizer.zero_grad()
+            loss.backward()
+            model.optimizer.step()
+
+            if batch_idx % 10 == 0:  # Log every 10 batches
+                print(f'Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}')
 
 
 if __name__ == '__main__':
@@ -34,5 +48,6 @@ if __name__ == '__main__':
 
     train_dataloader = OGMDataLoader(config['data'], phase='train').create_dataloader()
 
-    model = GraphWeightEncoder().to(config["device"])
-    train(model, None)
+    model = GraphWeightEncoder(config['model']).to(config['model']["device"])
+
+    train(model, train_dataloader, config)

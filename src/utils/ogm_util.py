@@ -1,6 +1,7 @@
 from copy import deepcopy
 
 import numpy as np
+import cv2
 from shapely import LineString
 from shapely.geometry import Polygon
 import matplotlib.pyplot as plt
@@ -104,11 +105,60 @@ def create_OGM_ego(ego_pts, ego_heading, visible_bbox, hidden_bbox, image, fixed
                     grid_gt[r, c] = 1  # occupied
                     break
 
+    # Filter out irrelevant regions (e.g., black areas in the map)
+    irrelevant_mask = _filter_irrelevant_regions(cell_polygons, image)
+    grid[irrelevant_mask] = 0.7
+    grid_gt[irrelevant_mask] = 0.7
+
+    # Store hidden cell centroids for extracting edge info in later steps
+    hidden_cell_centroids = []
+    image_width_height = image.shape[:2]
+    for r in range(GRID_ROWS):
+        for c in range(GRID_COLS):
+            if grid[r, c] == 0.5:  # hidden cell in ground truth
+                cx, cy = cell_polygons[r][c].centroid.coords[0]
+                hidden_cell_centroids.append((cx/image_width_height[1], cy/image_width_height[0]))
+
     # ---- VISUALIZATION ----
     # _visualise(image, visible_vehicle_polygons, driver_seat_loc, cell_polygons, grid)
     # _visualise(image, visible_vehicle_polygons + hidden_vehicle_polygons, driver_seat_loc, cell_polygons, grid_gt)
 
-    return grid, grid_gt
+    return grid, grid_gt, hidden_cell_centroids
+
+
+def _filter_irrelevant_regions(cell_polygons, map_image):
+    # assumes image is a 3-channel RGB image (numpy array)
+    COVERAGE_THRESHOLD = 0.8  # % of pixels that must be black to consider cell as irrelevant
+
+    irrelevant_mask = np.zeros((GRID_ROWS, GRID_COLS), dtype=bool)
+
+    for r in range(GRID_ROWS):
+        for c in range(GRID_COLS):
+            poly = cell_polygons[r][c]
+
+            # Convert polygon to integer pixel mask
+            # Step 1: create binary mask for the polygon
+            mask = np.zeros(map_image.shape[:2], dtype=np.uint8)
+            pts = np.array([np.array(poly.exterior.coords, dtype=np.int32)])
+            cv2.fillPoly(mask, pts, 255)
+
+            # Step 2: convert map image to grayscale
+            gray = cv2.cvtColor(map_image, cv2.COLOR_BGR2GRAY)
+
+            # Step 3: extract only masked region
+            region_pixels = gray[mask == 255]
+
+            # Step 4: compute black pixel ratio
+            if region_pixels.size == 0:
+                continue  # skip degenerate cells
+
+            black_ratio = np.mean(region_pixels == 0)
+
+            # Step 5: update mask
+            if black_ratio > COVERAGE_THRESHOLD:
+                irrelevant_mask[r, c] = True
+
+    return irrelevant_mask
 
 
 def _visualise(image, vehicle_polygons, driver_seat_loc, cell_polygons, grid):
@@ -130,7 +180,7 @@ def _visualise(image, vehicle_polygons, driver_seat_loc, cell_polygons, grid):
     ax.plot(driver_seat_loc[0], driver_seat_loc[1], 'bo', markersize=8, label='Ego')
 
     # Draw grid
-    colors = {0: 'white', 1: 'black', 0.5: 'gray'}
+    colors = {0: 'white', 1: 'black', 0.5: 'gray', 0.7: 'orange'}
     for r in range(GRID_ROWS):
         for c in range(GRID_COLS):
             cell = cell_polygons[r][c]

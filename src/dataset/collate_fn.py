@@ -8,15 +8,16 @@ def _pad_batch(batch, pad_value=0):
     Pads a batch of tensors to the maximum length in the batch.
     """
     N_max = max(t.shape[0] for t in batch)
-    t_shape = batch[0].shape[1]
-    f_shape = batch[0].shape[2]
 
     padded_batch = []
     for t in batch:
         pad_size = N_max - t.shape[0]
         # Pad on the N dimension: (pad_N_end, pad_N_start, pad_T_end, pad_T_start, pad_F_end, pad_F_start)
         # Since we only pad on N axis at the front (or end), we use: (0, 0, 0, 0, 0, pad_size)
-        padded = F.pad(t, (0, 0, 0, 0, 0, pad_size))  # Pad at end of N
+        if len(t.shape) == 2:  # N, F
+            padded = F.pad(t, (0, 0, 0, pad_size), value=pad_value)
+        elif len(t.shape) == 3:  # N, T, F
+            padded = F.pad(t, (0, 0, 0, 0, 0, pad_size), value=pad_value)  # Pad at end of N
         padded_batch.append(padded)
 
     return padded_batch
@@ -34,7 +35,7 @@ def custom_collate(batch):
             return torch.stack(elems)
         elif isinstance(elem, np.ndarray):
             return torch.from_numpy(np.array(elems))
-        elif isinstance(elem, (float, int)):
+        elif isinstance(elem, (float, int, np.float32)):
             return torch.tensor(elems)
         elif isinstance(elem, str):
             return list(elems)
@@ -52,11 +53,29 @@ def custom_collate(batch):
 
             # Pad the tensors in the dictionary to the maximum length
             return_d['historical_adjacent_obs'] = _pad_batch(return_d['historical_adjacent_obs'])
+            # return_d['mask'] = _pad_batch(return_d['mask'])
+            return_d['edge_weights'] = _pad_batch(return_d['edge_weights'])
+            return_d['edge_index'] = _pad_batch([b.permute(1, 0) for b in return_d['edge_index']], pad_value=-1)  # Permute to (N, F) for edge_index
 
             # convert list of tensors to a torch tensor
             for key in return_d.keys():
                 return_d[key] = torch.stack(return_d[key])
 
+            return_d['edge_index'] = return_d['edge_index'].permute(0, 2, 1)  # B, N, F -> B, F, N
+
+            # return_d['mask'] = return_d['mask'].squeeze()
+            #
+            # # Once the padding is done, calculate the edge indexes
+            # mask = return_d['mask'].permute(0, 2, 1)  # B, N, T -> B, T, N
+            # b, t, n = mask.shape
+            #
+            # edge_index_src = torch.arange(0, n).unsqueeze(0).repeat(t, 1).unsqueeze(0).repeat(b, 1, 1).to(mask.device)  # B, T, N
+            # edge_index_dst = torch.zeros_like(edge_index_src).to(mask.device)  # Initialize with zeros
+            #
+            # edge_index_src = torch.where(mask > 0, edge_index_src, 0)
+            # edge_index = torch.stack([edge_index_src, edge_index_dst], dim=1)
+            #
+            # return_d['edge_index'] = edge_index
             return return_d
 
         else:

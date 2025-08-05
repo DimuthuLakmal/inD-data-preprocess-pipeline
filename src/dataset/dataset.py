@@ -1,8 +1,10 @@
 import random
 from copy import deepcopy
 
+import numpy
 import torch
 from torch.utils.data import Dataset
+from typing import Tuple
 
 from src.utils.ogm_util import create_OGM_ego
 from src.utils.tracks_import import read_from_csv
@@ -14,6 +16,7 @@ import numpy as np
 from pathlib import Path
 import re
 import os
+import math
 
 from loguru import logger
 import pandas as pd
@@ -78,7 +81,7 @@ class OGMDataset(Dataset):
         self.input_path = config["dataset_dir"]
         self.dataset = config["dataset"].lower()
         self.history_length = config["history_length"]
-        self.num_features = 7  # x, y, heading, xVelocity, yVelocity, xAcceleration, yAcceleration
+        self.num_features = config['num_features']  # x, y, heading, xVelocity, yVelocity, xAcceleration, yAcceleration, t
 
         # Load dataset specific visualization parameters from file
         dataset_params_path = Path(config["visualizer_params_dir"]) / "visualizer_params.json"
@@ -126,8 +129,8 @@ class OGMDataset(Dataset):
                 frame_to_track_idxs = {}
                 for i_frame in range(minimum_frame, maximum_frame + 1):
                     indices = \
-                    tracks_meta[(tracks_meta["initialFrame"] <= i_frame) & (tracks_meta["finalFrame"] >= i_frame)][
-                        "trackId"].tolist()
+                        tracks_meta[(tracks_meta["initialFrame"] <= i_frame) & (tracks_meta["finalFrame"] >= i_frame)][
+                            "trackId"].tolist()
                     frame_to_track_idxs[i_frame] = indices
 
                 # We have to find out timesteps that have atleast one hidden record in the visiblity data.
@@ -174,21 +177,47 @@ class OGMDataset(Dataset):
                                            set(tracks_with_velocity))
                     if len(eligible_tracks) == 0: continue
 
+                    # Extract ego vehicle track information
                     ego_vehicle_track_idx = random.choice(eligible_tracks)
+                    ego_track = self.tracks[(self.tracks["trackId"] == ego_vehicle_track_idx)
+                                            & (self.tracks["recordingId"] == scene_id)].iloc[0].to_dict()
+                    ego_track_meta = self.tracks_meta[(self.tracks_meta["trackId"] == ego_vehicle_track_idx)
+                                                      & (self.tracks_meta["recordingId"] == scene_id)].iloc[0].to_dict()
+
+                    pts_ego = self._extract_track_info(ego_track, ego_track_meta, i_frame,
+                                                       self.background_images[scene_id].shape)["pts"]
+                    heading_ego = self._get_heading(ego_track, ego_track_meta, i_frame)
+
                     # extract historical data for the ego vehicle
-                    historical_adjacent_obs, historical_ego_obs, map_obs = self._extract_historical_data(
-                        ego_vehicle_track_idx, scene_id, i_frame)
+                    historical_adjacent_obs, historical_ego_obs, map_obs, visible_tracks_pts, last_recorded_t = (
+                        self._extract_historical_data(ego_track, ego_track_meta, scene_id, i_frame))
 
                     # extract ground truth data for the ego vehicle
-                    visible_tracks_pts, hidden_tracks_pts = self._extract_ground_truth_data(
-                        ego_vehicle_track_idx, scene_id, i_frame)
+                    hidden_tracks_pts = self._extract_ground_truth_data(ego_track, ego_track_meta, scene_id, i_frame)
+
+                    # Create OGM
+                    ogm, ogm_gt, hidden_ogm_cells = create_OGM_ego(pts_ego.squeeze(), heading_ego, visible_tracks_pts,
+                                                                   hidden_tracks_pts, self.background_images[scene_id],
+                                                                   self.fixed_blocks_info[scene_id])
+
+                    # Check if there are any hidden ogm cells. Should have at least one hidden ogm cell to create a valid sample
+                    if len(hidden_ogm_cells) == 0:
+                        continue
+
+                    # Extract distances for hidden ogm cells from adjacent tracks (This is a bi-partition graph)
+                    edge_weights, edge_index = self._extract_edge_info(historical_adjacent_obs, hidden_ogm_cells,
+                                                                       last_recorded_t)
 
                     self.data_dict[str(scene_id) + '_' + str(i_frame) + '_' + str(ego_vehicle_track_idx)] = {
                         "historical_adjacent_obs": historical_adjacent_obs,
                         "historical_ego_obs": historical_ego_obs,
                         "map_obs": None,
+                        "hidden_tracks_pts": hidden_tracks_pts,
                         "visible_tracks_pts": visible_tracks_pts,
-                        "hidden_tracks_pts": hidden_tracks_pts
+                        "edge_weights": edge_weights,
+                        "edge_index": edge_index,
+                        "ogm": ogm,
+                        "ogm_gt": ogm_gt,
                     }
 
                     print(str(scene_id) + '_' + str(i_frame) + '_' + str(ego_vehicle_track_idx))
@@ -219,34 +248,57 @@ class OGMDataset(Dataset):
         resized_map = cv2.resize(gt_background_img, (224, 224), interpolation=cv2.INTER_AREA)
 
         # Historical observations
-        historical_adjacent_obs, historical_ego_obs, map_obs, visible_tracks_pts, hidden_tracks_pts = (
-            data_dict["historical_adjacent_obs"], data_dict["historical_ego_obs"], data_dict["map_obs"],
-            data_dict["visible_tracks_pts"], data_dict["hidden_tracks_pts"])
+        historical_adjacent_obs, historical_ego_obs, map_obs, hidden_tracks_pts, visible_tracks_pts, edge_weights, \
+            edge_index, ogm, ogm_gt = (data_dict["historical_adjacent_obs"],
+                                       data_dict["historical_ego_obs"],
+                                       data_dict["map_obs"],
+                                       data_dict["hidden_tracks_pts"],
+                                       data_dict["visible_tracks_pts"],
+                                       data_dict["edge_weights"],
+                                       data_dict["edge_index"],
+                                       data_dict["ogm"],
+                                       data_dict["ogm_gt"])
 
         # Extract Ground Truth
-        ego_track = self.tracks[(self.tracks["trackId"] == ego_vehicle_track_idx)
-                                & (self.tracks["recordingId"] == scene_id)].iloc[0].to_dict()
-        ego_track_meta = self.tracks_meta[(self.tracks_meta["trackId"] == ego_vehicle_track_idx)
-                                          & (self.tracks_meta["recordingId"] == scene_id)].iloc[0].to_dict()
-        pts_ego = self._extract_track_info(ego_track, ego_track_meta, current_frame, backgrond_img.shape)["pts"]
-        heading_ego = self._get_heading(ego_track, ego_track_meta, current_frame)
+        # ego_track = self.tracks[(self.tracks["trackId"] == ego_vehicle_track_idx)
+        #                         & (self.tracks["recordingId"] == scene_id)].iloc[0].to_dict()
+        # ego_track_meta = self.tracks_meta[(self.tracks_meta["trackId"] == ego_vehicle_track_idx)
+        #                                   & (self.tracks_meta["recordingId"] == scene_id)].iloc[0].to_dict()
+        # pts_ego = self._extract_track_info(ego_track, ego_track_meta, current_frame, backgrond_img.shape)["pts"]
+        # heading_ego = self._get_heading(ego_track, ego_track_meta, current_frame)
+        #
+        # # Create OGM
+        # ogm, ogm_gt = create_OGM_ego(pts_ego.squeeze(), heading_ego, visible_tracks_pts, hidden_tracks_pts,
+        #                              gt_background_img, self.fixed_blocks_info[scene_id])
+        #
+        # # Remove distance feature from historical_adjacent_obs
+        # historical_adjacent_obs = np.array(list(historical_adjacent_obs.values()), dtype=np.float32)
+        # historical_adjacent_no_e = historical_adjacent_obs[:, :, :-1]
+        #
+        # # Extract the edge weights from the historical_adjacent_obs
+        # edge_weights = np.expand_dims(historical_adjacent_obs[:, :, -1], axis=-1)
 
-        # Create OGM
-        ogm, ogm_gt = create_OGM_ego(pts_ego.squeeze(), heading_ego, visible_tracks_pts, hidden_tracks_pts,
-                                     gt_background_img, self.fixed_blocks_info[scene_id])
+        historical_adjacent_obs = np.array(list(historical_adjacent_obs.values()), dtype=np.float32)
+        historical_adjacent_no_e = historical_adjacent_obs[:, :, :-1]
+
+        # # create masks for the historical observations
+        # mask = np.expand_dims(np.all(historical_adjacent_no_e != 0, axis=-1),
+        #                       axis=-1)  # Expanding dims required to pass in padding function in collate fn
 
         input = {
-            "historical_adjacent_obs": np.array(list(historical_adjacent_obs.values()), dtype=np.float32),
+            "historical_adjacent_obs": historical_adjacent_no_e,
             "historical_ego_obs": np.array(historical_ego_obs, dtype=np.float32),
             # "map_obs": map_obs,
             "ogm": ogm.astype(np.float32),
+            "edge_weights": np.expand_dims(numpy.array(edge_weights, dtype=np.float32), axis=-1),
+            "edge_index": numpy.array(edge_index, dtype=np.int32),
+            # "mask": mask,
         }
         target = ogm_gt.astype(np.float32)
 
         return input, target
 
-
-    def _extract_track_info(self, track, track_meta, t: int, width_height: tuple) -> dict:
+    def _extract_track_info(self, track, track_meta, t: int, height_width: tuple) -> dict:
         current_index = self._get_current_index(track_meta, t)
         if current_index < 0:
             return {}
@@ -285,7 +337,7 @@ class OGMDataset(Dataset):
         y_acceleration = track["yAcceleration"][current_index]
 
         # Normalize the center point to the range [0, 1]
-        center_point = [center_point[0] / width_height[0], center_point[1] / width_height[1]]
+        center_point = [center_point[0] / height_width[1], center_point[1] / height_width[0]]
 
         return {
             "pts": pts,
@@ -310,20 +362,29 @@ class OGMDataset(Dataset):
 
         return track["heading"][current_index]
 
-
-    def _extract_historical_data(self, ego_vehicle_track_idx, scene_id, current_frame):
-        ego_track = self.tracks[(self.tracks["trackId"] == ego_vehicle_track_idx)
-                                & (self.tracks["recordingId"] == scene_id)].iloc[0].to_dict()
-        ego_track_meta = self.tracks_meta[(self.tracks_meta["trackId"] == ego_vehicle_track_idx)
-                                          & (self.tracks_meta["recordingId"] == scene_id)].iloc[0].to_dict()
-
+    def _extract_historical_data(self, ego_track, ego_track_meta, scene_id, current_frame):
+        ego_vehicle_track_idx = ego_track["trackId"]
         # iterate through all the historical frames upto the current_frame
-        historical_adjacent_obs, historical_ego_obs, map_obs = {}, [], []
+        historical_adjacent_obs, historical_ego_obs, map_obs, visible_tracks_pts, last_recorded_t = {}, [], [], [], {}
 
         backgrond_img = self.background_images[scene_id]
         starting_frame = current_frame - self.history_length
-        for t in range(starting_frame, current_frame):  # T, N, D
+
+        history_t = 0
+        for t in range(starting_frame, current_frame + 1):  # T, N, D
             map = deepcopy(backgrond_img)
+
+            # Extract historical observations for the ego vehicle
+            ego_track_info = self._extract_track_info(ego_track, ego_track_meta, t, backgrond_img.shape)
+            cv2.fillPoly(map, [ego_track_info["pts"]], (255, 180, 200))
+            historical_ego_obs.append(np.array([ego_track_info["center"][0],
+                                                ego_track_info["center"][1],
+                                                ego_track_info["heading"],
+                                                ego_track_info["xVelocity"],
+                                                ego_track_info["yVelocity"],
+                                                ego_track_info["xAcceleration"],
+                                                ego_track_info["yAcceleration"]]))
+
             visible_track_ids = list(self.visibility_data[(self.visibility_data["trackId"] == ego_vehicle_track_idx)
                                                           & (self.visibility_data["frame"] == t)
                                                           & (self.visibility_data["visibility"] == True)
@@ -342,14 +403,25 @@ class OGMDataset(Dataset):
                 track_info = self._extract_track_info(track, track_meta, t, backgrond_img.shape)
                 cv2.fillPoly(map, [track_info["pts"]], (150, 150, 50))  # 150, 100, 150
 
+                # Calculate distance from the ego vehicle to the track center
+                distance_ego = math.sqrt((track_info["center"][0] - ego_track_info["center"][0]) ** 2 +
+                                         (track_info["center"][1] - ego_track_info["center"][1]) ** 2)
+
                 track_data = np.array([track_info["center"][0], track_info["center"][1], track_info["heading"],
                                        track_info["xVelocity"], track_info["yVelocity"], track_info["xAcceleration"],
-                                       track_info["yAcceleration"]])
+                                       track_info["yAcceleration"], (history_t / self.history_length), distance_ego])
+
+                last_recorded_t[track_idx] = history_t  # Store the last recorded time for the track
+
+                # visible track points
+                if t == current_frame:
+                    visible_tracks_pts.append(np.squeeze(track_info["pts"]))
 
                 if track_idx not in historical_adjacent_obs.keys():
                     if t > starting_frame:
                         # This object appeared lately. So have to add nulls/empty/zeros for previous frames
-                        historical_adjacent_obs[track_idx] = [np.zeros(self.num_features) for _ in range(starting_frame, t)]
+                        historical_adjacent_obs[track_idx] = [np.zeros(self.num_features + 1) for _ in
+                                                              range(starting_frame, t)]  # +1 for distance
                         historical_adjacent_obs[track_idx].append(track_data)
                     else:
                         historical_adjacent_obs[track_idx] = [track_data]
@@ -361,49 +433,71 @@ class OGMDataset(Dataset):
             # Fill the historical observations with zeros for the tracks that are not visible in the current frame
             for track_idx in historical_adjacent_obs.keys():
                 if track_idx not in recorded_tack_ids:
-                    historical_adjacent_obs[track_idx].append(np.zeros(self.num_features))
+                    historical_adjacent_obs[track_idx].append(np.zeros(self.num_features + 1))  # +1 for distance
 
-            # Extract historical observations for the ego vehicle
-            track_info = self._extract_track_info(ego_track, ego_track_meta, t, backgrond_img.shape)
-            cv2.fillPoly(map, [track_info["pts"]], (255, 180, 200))
-            historical_ego_obs.append(np.array([track_info["center"][0],
-                                                track_info["center"][1],
-                                                track_info["heading"],
-                                                track_info["xVelocity"],
-                                                track_info["yVelocity"],
-                                                track_info["xAcceleration"],
-                                                track_info["yAcceleration"]]))
+            # map_resized = cv2.resize(map, (224, 224), interpolation=cv2.INTER_AREA)
+            # map_obs.append(map_resized)
 
-            map_resized = cv2.resize(map, (224, 224), interpolation=cv2.INTER_AREA)
-            map_obs.append(map_resized)
+            history_t += 1
 
-        return historical_adjacent_obs, historical_ego_obs, map_obs
+        if len(historical_adjacent_obs) != len(visible_tracks_pts):
+            logger.warning("Number of historical adjacent observations does not match with visible tracks points. "
+                           "This might be due to missing tracks in the visibility data.")
 
-    def _extract_ground_truth_data(self, ego_vehicle_track_idx, scene_id, current_frame):
-        all_tracks_visibility_df = self.visibility_data[(self.visibility_data["frame"] == current_frame)
-                                                        & (self.visibility_data["trackId"] == ego_vehicle_track_idx)
-                                                        & (self.visibility_data["recordingId"] == scene_id)
-                                                        & (self.visibility_data["located"] == 'FRONT')]
+        return historical_adjacent_obs, historical_ego_obs, map_obs, visible_tracks_pts, last_recorded_t
 
-        all_track_idx = all_tracks_visibility_df["adjacentTrackId"].drop_duplicates().tolist()
-        visible_track_idx = (all_tracks_visibility_df[all_tracks_visibility_df["visibility"] == True]["adjacentTrackId"]
-                             .drop_duplicates().tolist())
-        all_tracks = self.tracks[(self.tracks["trackId"].isin(all_track_idx))
-                                 & (self.tracks["recordingId"] == scene_id)].to_dict('records')
+    def _extract_ground_truth_data(self, ego_track, ego_track_meta, scene_id, current_frame):
+        ego_vehicle_track_idx = ego_track["trackId"]
 
-        visible_track_pts = []
+        hidden_tracks_visibility_df = self.visibility_data[(self.visibility_data["frame"] == current_frame)
+                                                           & (self.visibility_data["trackId"] == ego_vehicle_track_idx)
+                                                           & (self.visibility_data["recordingId"] == scene_id)
+                                                           & (self.visibility_data["visibility"] == False)
+                                                           & (self.visibility_data["located"] == 'FRONT')]
+
+        hidden_track_idx = hidden_tracks_visibility_df["adjacentTrackId"].drop_duplicates().tolist()
+        hidden_tracks = self.tracks[(self.tracks["trackId"].isin(hidden_track_idx))
+                                    & (self.tracks["recordingId"] == scene_id)].to_dict('records')
+
+        ego_track_info = self._extract_track_info(ego_track, ego_track_meta, current_frame,
+                                                  self.background_images[scene_id].shape)
+
         hidden_tracks_pts = []
-        for track in all_tracks:
+        for track in hidden_tracks:
             track_meta = self.tracks_meta[(self.tracks_meta["trackId"] == track["trackId"])
                                           & (self.tracks_meta["recordingId"] == scene_id)].iloc[0].to_dict()
-            pts = self._extract_track_info(track, track_meta, current_frame, self.background_images[scene_id].shape)["pts"].squeeze()
+            track_info = self._extract_track_info(track, track_meta, current_frame,
+                                                  self.background_images[scene_id].shape)
 
-            if track["trackId"] in visible_track_idx:
-                visible_track_pts.append(pts)
-            else:
-                hidden_tracks_pts.append(pts)
+            # Calculate distance from the ego vehicle to the track center
+            distance = math.sqrt((track_info["center"][0] - ego_track_info["center"][0]) ** 2 +
+                                 (track_info["center"][1] - ego_track_info["center"][1]) ** 2)
+            pts = np.squeeze(track_info["pts"])
+
+            # Create a numpy array with the track information
+            track_data = np.array([track_info["center"][0], track_info["center"][1], track_info["heading"],
+                                   track_info["xVelocity"], track_info["yVelocity"], track_info["xAcceleration"],
+                                   track_info["yAcceleration"], distance])
+
+            hidden_tracks_pts.append(np.squeeze(pts))
 
             # cv2.fillPoly(backgrond_img, [pts], (0, 255, 255))
 
         # cv2.imshow('Image with Polygon', backgrond_img)
-        return visible_track_pts, hidden_tracks_pts
+        return hidden_tracks_pts
+
+    def _extract_edge_info(self, historical_adjacent_obs, hidden_ogm_cells, last_recorded_t) -> Tuple[list, list]:
+        edge_weights = []
+        edge_src, edge_dst = [], []
+        for i, cell in enumerate(hidden_ogm_cells):
+            for j, (track_idx, obs) in enumerate(historical_adjacent_obs.items()):
+                # Calculate the distance from the cell to the track center
+                obs_last_t = last_recorded_t[track_idx]
+                distance = math.sqrt((cell[0] - obs[obs_last_t][0]) ** 2 + (cell[1] - obs[obs_last_t][1]) ** 2)
+                edge_weights.append(distance)
+
+                edge_src.append(j)  # Source index is the track index
+                edge_dst.append(i)  # Destination index is the cell index
+
+        edge_index = [edge_src, edge_dst]
+        return edge_weights, edge_index

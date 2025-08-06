@@ -10,7 +10,6 @@ class GraphWeightEncoder(nn.Module):
         super(GraphWeightEncoder, self).__init__()
 
         self.device = config['device']
-        config = config['graph_weight_encoder']
 
         num_heads = config['num_heads']
         num_layers = config['num_layers']
@@ -45,11 +44,11 @@ class GraphWeightEncoder(nn.Module):
         self.fc_out = nn.Linear(dim_model, out_dim)
 
     def forward(self, x):
-        x_adjacent_hist = x['historical_adjacent_obs'].to(self.device)
-        x_ego_hist = x['historical_ego_obs'].to(self.device)
-        x_hist = torch.cat((x_ego_hist.unsqueeze(dim=1), x_adjacent_hist), dim=1)
+        x_adjacent_hist = x['historical_adjacent_obs']
+        # x_ego_hist = x['historical_ego_obs'].to(self.device)
+        # x_hist = torch.cat((x_ego_hist.unsqueeze(dim=1), x_adjacent_hist), dim=1)
 
-        x = self.hist_emb(x_hist)
+        x = self.hist_emb(x_adjacent_hist)
         out_e = self.positional_encoder(x)
         out_e_shp = out_e.shape
 

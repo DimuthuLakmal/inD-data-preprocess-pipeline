@@ -3,6 +3,7 @@ import argparse
 import yaml
 
 from src.dataset.data_loader import OGMDataLoader
+from src.models.spatio_temporal_encoder import SGATTransformer
 from src.models.transformer.graph_weight_encoder import GraphWeightEncoder
 
 
@@ -28,7 +29,9 @@ def train(model, data_loader, config):
     for epoch in range(config['model']['train_epochs']):  # Example: 10 epochs
         for batch_idx, (inputs, target) in enumerate(data_loader):
 
+            # Move data to the correct device
             targets = target.to(config['model']["device"])
+            inputs = {k: v.to(config['model']["device"]) for k, v in inputs.items()}
 
             outputs = model(inputs)
             loss = model.loss(outputs, targets)
@@ -48,6 +51,6 @@ if __name__ == '__main__':
 
     train_dataloader = OGMDataLoader(config['data'], phase='train').create_dataloader()
 
-    model = GraphWeightEncoder(config['model']).to(config['model']["device"])
+    model = SGATTransformer(config['model']).to(config['model']["device"])
 
     train(model, train_dataloader, config)

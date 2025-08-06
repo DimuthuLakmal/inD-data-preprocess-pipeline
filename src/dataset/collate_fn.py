@@ -56,6 +56,7 @@ def custom_collate(batch):
             # return_d['mask'] = _pad_batch(return_d['mask'])
             return_d['edge_weights'] = _pad_batch(return_d['edge_weights'])
             return_d['edge_index'] = _pad_batch([b.permute(1, 0) for b in return_d['edge_index']], pad_value=-1)  # Permute to (N, F) for edge_index
+            return_d['hidden_ogm_cells'] = _pad_batch(return_d['hidden_ogm_cells'])
 
             # convert list of tensors to a torch tensor
             for key in return_d.keys():

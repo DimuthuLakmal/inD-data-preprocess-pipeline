@@ -218,6 +218,7 @@ class OGMDataset(Dataset):
                         "edge_index": edge_index,
                         "ogm": ogm,
                         "ogm_gt": ogm_gt,
+                        "hidden_ogm_cells": hidden_ogm_cells
                     }
 
                     print(str(scene_id) + '_' + str(i_frame) + '_' + str(ego_vehicle_track_idx))
@@ -292,6 +293,7 @@ class OGMDataset(Dataset):
             "ogm": ogm.astype(np.float32),
             "edge_weights": np.expand_dims(numpy.array(edge_weights, dtype=np.float32), axis=-1),
             "edge_index": numpy.array(edge_index, dtype=np.int32),
+            "hidden_ogm_cells": np.array(data_dict["hidden_ogm_cells"], dtype=np.float32),
             # "mask": mask,
         }
         target = ogm_gt.astype(np.float32)

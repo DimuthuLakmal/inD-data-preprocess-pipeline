@@ -303,25 +303,6 @@ class GATv2Conv(MessagePassing):
         assert x_l is not None
         assert x_r is not None
 
-        if self.add_self_loops:
-            if isinstance(edge_index, Tensor):
-                num_nodes = x_l.size(0)
-                if x_r is not None:
-                    num_nodes = min(num_nodes, x_r.size(0))
-                edge_index, edge_attr = remove_self_loops(
-                    edge_index, edge_attr)
-                edge_index, edge_attr = add_self_loops(
-                    edge_index, edge_attr, fill_value=self.fill_value,
-                    num_nodes=num_nodes)
-            elif isinstance(edge_index, SparseTensor):
-                if self.edge_dim is None:
-                    edge_index = torch_sparse.set_diag(edge_index)
-                else:
-                    raise NotImplementedError(
-                        "The usage of 'edge_attr' and 'add_self_loops' "
-                        "simultaneously is currently not yet supported for "
-                        "'edge_index' in a 'SparseTensor' form")
-
         # edge_updater_type: (x: PairTensor, edge_attr: OptTensor)
         alpha = self.edge_updater(edge_index, x=(x_l, x_r),
                                   edge_attr=edge_attr)

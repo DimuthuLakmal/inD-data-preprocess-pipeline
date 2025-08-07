@@ -53,16 +53,18 @@ def custom_collate(batch):
 
             # Pad the tensors in the dictionary to the maximum length
             return_d['historical_adjacent_obs'] = _pad_batch(return_d['historical_adjacent_obs'])
-            # return_d['mask'] = _pad_batch(return_d['mask'])
-            return_d['edge_weights'] = _pad_batch(return_d['edge_weights'])
-            return_d['edge_index'] = _pad_batch([b.permute(1, 0) for b in return_d['edge_index']], pad_value=-1)  # Permute to (N, F) for edge_index
             return_d['hidden_ogm_cells'] = _pad_batch(return_d['hidden_ogm_cells'])
 
             # convert list of tensors to a torch tensor
             for key in return_d.keys():
-                return_d[key] = torch.stack(return_d[key])
+                if key != 'edge_index' and key != 'edge_weights':
+                    return_d[key] = torch.stack(return_d[key])
 
-            return_d['edge_index'] = return_d['edge_index'].permute(0, 2, 1)  # B, N, F -> B, F, N
+            # create masks using the historical observations (Will be used to mask out irrelevant cells later)
+            mask = (return_d['hidden_ogm_cells'] != 0).all(dim=-1)
+            return_d['mask'] = mask
+
+            # return_d['edge_index'] = return_d['edge_index'].permute(0, 2, 1)  # B, N, F -> B, F, N
 
             # return_d['mask'] = return_d['mask'].squeeze()
             #
@@ -83,6 +85,11 @@ def custom_collate(batch):
             raise TypeError(f"Unsupported type: {type(elem)}")
 
     collated_inputs = collate_elem(inputs)
-    collated_targets = collate_elem(targets)
+
+    # Collate targets
+    target_collated = []
+    for i, target in enumerate(targets):
+        target_collated.append(collate_elem(target))
+    collated_targets = torch.stack(_pad_batch(target_collated))  # Stack and pad targets
 
     return collated_inputs, collated_targets

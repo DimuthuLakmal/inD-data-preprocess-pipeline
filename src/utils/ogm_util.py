@@ -117,7 +117,7 @@ def create_OGM_ego(ego_pts, ego_heading, visible_bbox, hidden_bbox, image, fixed
         for c in range(GRID_COLS):
             if grid[r, c] == 0.5:  # hidden cell in ground truth
                 cx, cy = cell_polygons[r][c].centroid.coords[0]
-                hidden_cell_centroids.append((cx/image_width_height[1], cy/image_width_height[0]))
+                hidden_cell_centroids.append([cx/image_width_height[1], cy/image_width_height[0], grid_gt[r, c]])
 
     # ---- VISUALIZATION ----
     # _visualise(image, visible_vehicle_polygons, driver_seat_loc, cell_polygons, grid)

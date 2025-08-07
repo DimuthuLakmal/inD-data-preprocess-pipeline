@@ -23,10 +23,12 @@ class SGATTransformer(nn.Module):
 
         gat_configs = configs['gat']
         self.gat_layer = GATLayer(gat_configs)
+        self.fc_gat_out = nn.Linear(gat_configs['dim_model'], 1)
 
     def forward(self, x):
         x_gwe = self.gw_encoder(x)
         x_te = self.temporal_encoder(x)
 
         gat_out = self.gat_layer(x_te, x_gwe, x)
+        gat_out = self.fc_gat_out(gat_out)
         return gat_out

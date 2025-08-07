@@ -5,6 +5,7 @@ import yaml
 from src.dataset.data_loader import OGMDataLoader
 from src.models.spatio_temporal_encoder import SGATTransformer
 from src.models.transformer.graph_weight_encoder import GraphWeightEncoder
+import torch.nn as nn
 
 
 def create_args():
@@ -31,10 +32,20 @@ def train(model, data_loader, config):
 
             # Move data to the correct device
             targets = target.to(config['model']["device"])
-            inputs = {k: v.to(config['model']["device"]) for k, v in inputs.items()}
+            for k, v in inputs.items():
+                if k != 'edge_index' and k != 'edge_weights':
+                    inputs[k] = v.to(config['model']["device"])
 
-            outputs = model(inputs)
-            loss = model.loss(outputs, targets)
+            outputs = model(inputs).squeeze()
+
+            # Calculate the binary cross-entropy loss
+            # Masking is applied to ignore unwanted cells
+            loss_fn = nn.BCELoss()
+            mask = inputs['mask']  # Mask indicates the non-padded cells (1: valid, 0: padded)
+            outputs = outputs * mask  # Apply mask to outputs
+            targets = targets.squeeze() * mask  # Apply mask to targets
+
+            loss = loss_fn(nn.Sigmoid()(outputs), targets)
 
             model.optimizer.zero_grad()
             loss.backward()

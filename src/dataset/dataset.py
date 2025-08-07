@@ -282,9 +282,7 @@ class OGMDataset(Dataset):
         historical_adjacent_obs = np.array(list(historical_adjacent_obs.values()), dtype=np.float32)
         historical_adjacent_no_e = historical_adjacent_obs[:, :, :-1]
 
-        # # create masks for the historical observations
-        # mask = np.expand_dims(np.all(historical_adjacent_no_e != 0, axis=-1),
-        #                       axis=-1)  # Expanding dims required to pass in padding function in collate fn
+        hidden_ogm_cells = np.array(data_dict["hidden_ogm_cells"], dtype=np.float32)
 
         input = {
             "historical_adjacent_obs": historical_adjacent_no_e,
@@ -292,11 +290,11 @@ class OGMDataset(Dataset):
             # "map_obs": map_obs,
             "ogm": ogm.astype(np.float32),
             "edge_weights": np.expand_dims(numpy.array(edge_weights, dtype=np.float32), axis=-1),
-            "edge_index": numpy.array(edge_index, dtype=np.int32),
-            "hidden_ogm_cells": np.array(data_dict["hidden_ogm_cells"], dtype=np.float32),
+            "edge_index": numpy.array(edge_index, dtype=np.int64),
+            "hidden_ogm_cells": hidden_ogm_cells[:, :-1],
             # "mask": mask,
         }
-        target = ogm_gt.astype(np.float32)
+        target = hidden_ogm_cells[:, -1:].astype(np.float32)
 
         return input, target
 

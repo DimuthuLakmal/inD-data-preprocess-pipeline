@@ -1,3 +1,4 @@
+import random
 from copy import deepcopy
 
 import numpy as np
@@ -64,20 +65,75 @@ def create_OGM_ego(ego_pts, ego_heading, visible_bbox, hidden_bbox, image, fixed
 
             cell_polygons[r][c] = Polygon(corners_global)
 
-    occupied_polygons = (visible_vehicle_polygons + fixed_blocks_polygons)
+    all_vehicle_polygons = visible_vehicle_polygons + hidden_vehicle_polygons
+    known_occupied_polygons = (visible_vehicle_polygons + fixed_blocks_polygons)  # only visible vehicles and fixed blocks are known to be occupied
+
+    def is_fully_occupied(cell, poly):
+        intersection = cell.intersection(poly)
+
+        polygon_ratio = poly.area / cell.area
+        # following if else check if the cell is significantly larger than the polygon (eg: in case of Humans, treees etc.)
+
+        # if the is comparatively larger polygon, then check if it occupies more than 70% of the cell
+        if polygon_ratio > 0.7:
+            overlap_ratio = intersection.area / cell.area
+            # if cell is smaller and overlap is more than 30%, then it is occupied
+            if overlap_ratio > 0.2:
+                return True
+        else:
+            # if the polygon is smaller, then check if the intersection is comparable with the polygon itself.
+            overlap_ratio = intersection.area / poly.area
+            if overlap_ratio > 0.5:
+                return True
+
+        return False
 
     # ---- OCCUPANCY TEST ----
     for r in range(GRID_ROWS):
         for c in range(GRID_COLS):
             cell = cell_polygons[r][c]
-            for poly in occupied_polygons:
+            intersected = False
+            for poly in all_vehicle_polygons:
                 if cell.intersects(poly):
-                    grid[r, c] = 1  # occupied
-                    break
-            else:
+                    if is_fully_occupied(cell, poly):
+                        grid[r, c] = 1
+                        intersected = True
+                        break
+                    else:
+                        grid[r, c] = 0
+
+            for poly in fixed_blocks_polygons:
+                if cell.intersects(poly):
+                    if is_fully_occupied(cell, poly) and grid[r, c] != 1:  # if already occupied by a vehicle, do not override
+                        grid[r, c] = 3
+                        intersected = True
+                        break
+
+            if not intersected:
                 grid[r, c] = 0  # free
 
     grid_gt = deepcopy(grid)  # keep ground truth for occlusion detection
+
+    # Mark if the cell is occupied by a hidden vehicle. This will be used later for loop
+    for r in range(GRID_ROWS):
+        for c in range(GRID_COLS):
+            cell = cell_polygons[r][c]
+            for poly in hidden_vehicle_polygons:
+                if cell.intersects(poly):
+                    if is_fully_occupied(cell, poly):
+                        grid[r, c] = 2  # occupied
+                        break
+                    else:
+                        grid[r, c] = 0
+
+    # Check if at least one of the cell is occupied by a hidden vehicle
+    # If not, then return None as the data is not useful
+    has_hidden_vehicle = np.any(grid == 2)
+    if not has_hidden_vehicle:
+        return None, None, None, None  # no hidden vehicles detected
+
+    # The following indices will be used to sample the cells later
+    occupied_by_hidden_indices = np.where(grid == 2)
 
     # ---- VISIBILITY TEST ----
     # simple line-of-sight: if a cell center has line blocked by vehicles → occluded
@@ -91,39 +147,54 @@ def create_OGM_ego(ego_pts, ego_heading, visible_bbox, hidden_bbox, image, fixed
     for r in range(GRID_ROWS):
         for c in range(GRID_COLS):
             cx, cy = cell_polygons[r][c].centroid.coords[0]
-            if not is_visible((cx, cy), (driver_seat_loc[0], driver_seat_loc[1]), occupied_polygons):
-                if grid[r, c] == 0:  # only override if free
+            if not is_visible((cx, cy), (driver_seat_loc[0], driver_seat_loc[1]), known_occupied_polygons):
+                if grid[r, c] == 0:  # only override if free. We don't mark cells occupied by hidden vehicles as hidden yet. Will do it later.
                     grid[r, c] = 0.5  # mark as occluded
 
-
-    # ---- FURTHER OCCUPANCY TEST FOR HIDDEN VEHICLES IN GT----
-    for r in range(GRID_ROWS):
-        for c in range(GRID_COLS):
-            cell = cell_polygons[r][c]
-            for poly in hidden_vehicle_polygons:
-                if cell.intersects(poly):
-                    grid_gt[r, c] = 1  # occupied
-                    break
 
     # Filter out irrelevant regions (e.g., black areas in the map)
     irrelevant_mask = _filter_irrelevant_regions(cell_polygons, image)
     grid[irrelevant_mask] = 0.7
     grid_gt[irrelevant_mask] = 0.7
 
+    ### Data Sampling ##########
+    unoccupied_indices = np.where(grid == 0.5)
+
+    # Decides which type is more. Usually this is free cells, But we cannot 100% guarantee that.
+    num_selections = min(len(occupied_by_hidden_indices[0]), len(unoccupied_indices[0]))
+    max_array_size = max(len(occupied_by_hidden_indices[0]), len(unoccupied_indices[0]))
+    random_indices = random.sample(range(max_array_size), num_selections)
+
+    selected_indices_unoccupied, selected_indices_occupied = None, None
+    if len(occupied_by_hidden_indices[0]) == num_selections:  # if occupied cells are less, then randomly select from unoccupied cells
+        selected_indices_unoccupied = (unoccupied_indices[0][random_indices], unoccupied_indices[1][random_indices])
+        selected_indices_occupied = occupied_by_hidden_indices
+    else:  # if unoccupied cells are less, then randomly select from occupied cells
+        selected_indices_occupied = (occupied_by_hidden_indices[0][random_indices], occupied_by_hidden_indices[1][random_indices])
+        selected_indices_unoccupied = unoccupied_indices
+
+    selected_indices_raws = np.concatenate((selected_indices_unoccupied[0], selected_indices_occupied[0]))
+    selected_indices_cols = np.concatenate((selected_indices_unoccupied[1], selected_indices_occupied[1]))
+
+    # Now we can safely mark cells occupied by hidden vehicles as not visible
+    # grid[occupied_by_hidden_indices] = 0.5  # mark as occluded
+
     # Store hidden cell centroids for extracting edge info in later steps
-    hidden_cell_centroids = []
+    hidden_cell_data = []
+    hidden_cell_polygon_xys = []
     image_width_height = image.shape[:2]
-    for r in range(GRID_ROWS):
-        for c in range(GRID_COLS):
-            if grid[r, c] == 0.5:  # hidden cell in ground truth
-                cx, cy = cell_polygons[r][c].centroid.coords[0]
-                hidden_cell_centroids.append([cx/image_width_height[1], cy/image_width_height[0], grid_gt[r, c]])
+    for r, c in zip(selected_indices_raws, selected_indices_cols):
+        cx, cy = cell_polygons[r][c].centroid.coords[0]
+        hidden_cell_data.append(
+            [cx / image_width_height[1], cy / image_width_height[0], grid_gt[r, c]])  # normalized x, y, occupancy
+        hidden_cell_polygon_xys.append(cell_polygons[r][c].exterior.coords[:])
+
 
     # ---- VISUALIZATION ----
-    # _visualise(image, visible_vehicle_polygons, driver_seat_loc, cell_polygons, grid)
+    # _visualise(image, visible_vehicle_polygons + hidden_vehicle_polygons, driver_seat_loc, cell_polygons, grid)
     # _visualise(image, visible_vehicle_polygons + hidden_vehicle_polygons, driver_seat_loc, cell_polygons, grid_gt)
 
-    return grid, grid_gt, hidden_cell_centroids
+    return grid, grid_gt, hidden_cell_data, hidden_cell_polygon_xys
 
 
 def _filter_irrelevant_regions(cell_polygons, map_image):
@@ -180,11 +251,13 @@ def _visualise(image, vehicle_polygons, driver_seat_loc, cell_polygons, grid):
     ax.plot(driver_seat_loc[0], driver_seat_loc[1], 'bo', markersize=8, label='Ego')
 
     # Draw grid
-    colors = {0: 'white', 1: 'black', 0.5: 'gray', 0.7: 'orange'}
+    colors = {0: 'white', 1: 'black', 0.5: 'gray', 0.7: 'orange', 2: 'yellow', 3: 'brown'}
     for r in range(GRID_ROWS):
         for c in range(GRID_COLS):
             cell = cell_polygons[r][c]
             x, y = cell.exterior.xy
+            if grid[r, c] == 2:
+                print('A 2 is here')
             ax.fill(x, y, color=colors[grid[r, c]], alpha=0.7, edgecolor='k', linewidth=0.2)
 
     plt.title("Occupancy Grid Map")

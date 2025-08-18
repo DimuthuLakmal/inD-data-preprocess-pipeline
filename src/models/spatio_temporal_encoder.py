@@ -4,7 +4,7 @@ from torch import nn
 from src.models.gat.gat_layer import GATLayer
 from src.models.transformer.graph_weight_encoder import GraphWeightEncoder
 from src.models.transformer.temporal_encoder import TemporalEncoder
-from src.models.gat.gat import GATv2Conv
+from src.models.unet.unet import UNet, AttU_Net
 
 
 class SGATTransformer(nn.Module):
@@ -25,10 +25,21 @@ class SGATTransformer(nn.Module):
         self.gat_layer = GATLayer(gat_configs)
         self.fc_gat_out = nn.Linear(gat_configs['dim_model'], 1)
 
+        unet_configs = configs['unet']
+        self.unet = AttU_Net()
+
+    def reset_parameters(self):
+        """Reset parameters of the model."""
+        torch.nn.init.xavier_uniform_(self.fc_gat_out.weight)
+        # TODO: since the classes are not balanced, the weights can be initialized as pos/total
+
     def forward(self, x):
         x_gwe = self.gw_encoder(x)
         x_te = self.temporal_encoder(x)
 
         gat_out = self.gat_layer(x_te, x_gwe, x)
         gat_out = self.fc_gat_out(gat_out)
+
+        unet_out = self.unet(x)
+
         return gat_out

@@ -81,7 +81,8 @@ class OGMDataset(Dataset):
         self.input_path = config["dataset_dir"]
         self.dataset = config["dataset"].lower()
         self.history_length = config["history_length"]
-        self.num_features = config['num_features']  # x, y, heading, xVelocity, yVelocity, xAcceleration, yAcceleration, t
+        self.num_features = config[
+            'num_features']  # x, y, heading, xVelocity, yVelocity, xAcceleration, yAcceleration, t
 
         # Load dataset specific visualization parameters from file
         dataset_params_path = Path(config["visualizer_params_dir"]) / "visualizer_params.json"
@@ -135,7 +136,7 @@ class OGMDataset(Dataset):
 
                 # We have to find out timesteps that have atleast one hidden record in the visiblity data.
                 # We cannot start from the minimum_frame as we have to include the history as well.
-                for i_frame in range(minimum_frame + self.history_length, 1000,
+                for i_frame in range(minimum_frame + self.history_length, maximum_frame,
                                      (self.history_length * 2)):
 
                     hidden_objects = visibility_data[(visibility_data['frame'] == i_frame) &
@@ -196,9 +197,17 @@ class OGMDataset(Dataset):
                     hidden_tracks_pts = self._extract_ground_truth_data(ego_track, ego_track_meta, scene_id, i_frame)
 
                     # Create OGM
-                    ogm, ogm_gt, hidden_ogm_cells = create_OGM_ego(pts_ego.squeeze(), heading_ego, visible_tracks_pts,
-                                                                   hidden_tracks_pts, self.background_images[scene_id],
-                                                                   self.fixed_blocks_info[scene_id])
+                    ogm, ogm_gt, hidden_ogm_cells, hidden_cell_polygon_xys = create_OGM_ego(pts_ego.squeeze(),
+                                                                                            heading_ego,
+                                                                                            visible_tracks_pts,
+                                                                                            hidden_tracks_pts,
+                                                                                            self.background_images[
+                                                                                                scene_id],
+                                                                                            self.fixed_blocks_info[
+                                                                                                scene_id])
+
+                    if ogm is None:
+                        continue
 
                     # Check if there are any hidden ogm cells. Should have at least one hidden ogm cell to create a valid sample
                     if len(hidden_ogm_cells) == 0:
@@ -218,7 +227,8 @@ class OGMDataset(Dataset):
                         "edge_index": edge_index,
                         "ogm": ogm,
                         "ogm_gt": ogm_gt,
-                        "hidden_ogm_cells": hidden_ogm_cells
+                        "hidden_ogm_cells": hidden_ogm_cells,
+                        "hidden_cell_polygon_xys": hidden_cell_polygon_xys
                     }
 
                     print(str(scene_id) + '_' + str(i_frame) + '_' + str(ego_vehicle_track_idx))
@@ -250,7 +260,7 @@ class OGMDataset(Dataset):
 
         # Historical observations
         historical_adjacent_obs, historical_ego_obs, map_obs, hidden_tracks_pts, visible_tracks_pts, edge_weights, \
-            edge_index, ogm, ogm_gt = (data_dict["historical_adjacent_obs"],
+            edge_index, ogm, ogm_gt, hidden_cell_polygon_xys = (data_dict["historical_adjacent_obs"],
                                        data_dict["historical_ego_obs"],
                                        data_dict["map_obs"],
                                        data_dict["hidden_tracks_pts"],
@@ -258,7 +268,13 @@ class OGMDataset(Dataset):
                                        data_dict["edge_weights"],
                                        data_dict["edge_index"],
                                        data_dict["ogm"],
-                                       data_dict["ogm_gt"])
+                                       data_dict["ogm_gt"],
+                                       data_dict["hidden_cell_polygon_xys"])
+
+        # Create a black background image a size of background_img
+        blank_img = np.zeros_like(backgrond_img)
+        for cel in hidden_cell_polygon_xys:
+            cv2.fillPoly(blank_img, [np.array(cel).astype(np.int32)], (255, 255, 255))
 
         # Extract Ground Truth
         # ego_track = self.tracks[(self.tracks["trackId"] == ego_vehicle_track_idx)
@@ -279,15 +295,20 @@ class OGMDataset(Dataset):
         # # Extract the edge weights from the historical_adjacent_obs
         # edge_weights = np.expand_dims(historical_adjacent_obs[:, :, -1], axis=-1)
 
+
         historical_adjacent_obs = np.array(list(historical_adjacent_obs.values()), dtype=np.float32)
         historical_adjacent_no_e = historical_adjacent_obs[:, :, :-1]
 
         hidden_ogm_cells = np.array(data_dict["hidden_ogm_cells"], dtype=np.float32)
 
+        # Visual representation of the map
+        map_resized = cv2.resize(self.background_images[scene_id], (224, 224), interpolation=cv2.INTER_AREA)
+        hidden_cells_resized = cv2.resize(blank_img, (224, 224), interpolation=cv2.INTER_AREA)
+
         input = {
             "historical_adjacent_obs": historical_adjacent_no_e,
             "historical_ego_obs": np.array(historical_ego_obs, dtype=np.float32),
-            # "map_obs": map_obs,
+            "map_obs": map_resized.astype(np.float32),
             "ogm": ogm.astype(np.float32),
             "edge_weights": np.expand_dims(numpy.array(edge_weights, dtype=np.float32), axis=-1),
             "edge_index": numpy.array(edge_index, dtype=np.int64),

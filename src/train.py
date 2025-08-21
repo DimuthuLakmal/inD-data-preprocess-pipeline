@@ -1,5 +1,6 @@
 import argparse
 
+import torch
 import yaml
 
 from src.dataset.data_loader import OGMDataLoader
@@ -27,6 +28,11 @@ def create_args():
 
 def train(model, data_loader, config):
     model.train()
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=config['model']['lr'])
+    optimizer.zero_grad()
+    loss_fn = nn.BCELoss()
+
     for epoch in range(config['model']['train_epochs']):  # Example: 10 epochs
         for batch_idx, (inputs, target) in enumerate(data_loader):
 
@@ -36,20 +42,21 @@ def train(model, data_loader, config):
                 if k != 'edge_index' and k != 'edge_weights':
                     inputs[k] = v.to(config['model']["device"])
 
-            outputs = model(inputs).squeeze()
+            mask = inputs['mask']  # Mask indicates the non-padded cells (1: valid, 0: padded)
+            outputs = model(inputs, ~mask).squeeze()
 
             # Calculate the binary cross-entropy loss
             # Masking is applied to ignore unwanted cells
-            loss_fn = nn.BCELoss()
-            mask = inputs['mask']  # Mask indicates the non-padded cells (1: valid, 0: padded)
-            outputs = outputs * mask  # Apply mask to outputs
             targets = targets.squeeze() * mask  # Apply mask to targets
+
+            mask_fixed_blocks = (targets != 3)
+            targets = targets * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not occupied
 
             loss = loss_fn(nn.Sigmoid()(outputs), targets)
 
-            model.optimizer.zero_grad()
+            optimizer.zero_grad()
             loss.backward()
-            model.optimizer.step()
+            optimizer.step()
 
             if batch_idx % 10 == 0:  # Log every 10 batches
                 print(f'Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}')

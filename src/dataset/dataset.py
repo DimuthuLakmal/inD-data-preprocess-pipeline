@@ -46,73 +46,87 @@ class OGMDataset(Dataset):
         self.fixed_blocks_info = {}
         self.frame_to_track_idxs = {}
 
-        start_scene = 0
-        end_scene = 2
-
-        for scene_id in scene_ids:
-
-            if int(scene_id) < start_scene or int(scene_id) > end_scene:
-                continue
-
-            tracks_file = os.path.join(self.input_path, f"{scene_id}_tracks.csv")
-            tracks_meta_file = os.path.join(self.input_path, f"{scene_id}_tracksMeta.csv")
-            recording_meta_file = os.path.join(self.input_path, f"{scene_id}_recordingMeta.csv")
-            fixed_blocks_file = os.path.join(self.input_path, f"{scene_id}_fixedBlocks.csv")
-            visibility_file = os.path.join(self.input_path, f"{scene_id}_visibilityData.csv")
-
-            tracks, tracks_meta, recording_meta, fixed_blocks_info = read_from_csv(
-                tracks_file, tracks_meta_file, recording_meta_file, fixed_blocks_file, include_px_coordinates=True
-            )
-
-            visibility_df = pd.read_csv(visibility_file)
-            self.fixed_blocks_info[int(scene_id)] = fixed_blocks_info
-
-            # Collect DataFrames
-            self.tracks.append(pd.DataFrame(tracks))
-            self.tracks_meta.append(pd.DataFrame(tracks_meta))
-            self.visibility_data.append(visibility_df)
-
-            # Store background images for scenes
-            bg_path = os.path.join(self.input_path, 'semantic_maps', f"{scene_id}_background.png")
-            img = cv2.imread(bg_path)
-            self.background_images[int(scene_id)] = img
-
-        self.config = config
-        self.input_path = config["dataset_dir"]
-        self.dataset = config["dataset"].lower()
-        self.history_length = config["history_length"]
-        self.num_features = config[
-            'num_features']  # x, y, heading, xVelocity, yVelocity, xAcceleration, yAcceleration, t
-
-        # Load dataset specific visualization parameters from file
-        dataset_params_path = Path(config["visualizer_params_dir"]) / "visualizer_params.json"
-
-        if not dataset_params_path.exists():
-            logger.error("Could not find dataset visualization parameters in {}", dataset_params_path)
-            sys.exit(-1)
-
-        with open(dataset_params_path) as f:
-            self.dataset_params = json.load(f)
-
-        if self.dataset not in self.dataset_params["datasets"]:
-            logger.error("Visualization parameters for dataset {} not found in {}. Please make sure, that the needed "
-                         "parameters are given", self.dataset, dataset_params_path)
-            sys.exit(-1)
-
-        self.dataset_params = self.dataset_params["datasets"][self.dataset]
-        self.scale_down_factor = self.dataset_params["scale_down_factor"]
-
-        self.tracks = pd.concat(self.tracks, ignore_index=True)
-        self.tracks_meta = pd.concat(self.tracks_meta, ignore_index=True)
-        self.visibility_data = pd.concat(self.visibility_data, ignore_index=True)
+        start_scene = 22
+        end_scene = 24
+        filename = "index_map5.pkl"
 
         self.data_dict = {}
-        # Check index file saved into a file
-        index_file_path = Path(os.path.join(self.input_path, "index_map1.pkl"))
+
+        # Check data file exists
+        index_file_path = Path(os.path.join(self.input_path, filename))
         if index_file_path.exists():
             logger.info("Loading index map from {}", index_file_path)
             self.data_dict = pickle.load(open(index_file_path, "rb"))
+
+            # Loading background images
+            for scene_id in scene_ids:
+                if int(scene_id) < start_scene or int(scene_id) > end_scene:
+                    continue
+
+                # Store background images for scenes
+                bg_path = os.path.join(self.input_path, 'semantic_maps', f"{scene_id}_background.png")
+                img = cv2.imread(bg_path)
+                self.background_images[int(scene_id)] = img
+
         else:
+            for scene_id in scene_ids:
+
+                if int(scene_id) < start_scene or int(scene_id) > end_scene:
+                    continue
+
+                tracks_file = os.path.join(self.input_path, f"{scene_id}_tracks.csv")
+                tracks_meta_file = os.path.join(self.input_path, f"{scene_id}_tracksMeta.csv")
+                recording_meta_file = os.path.join(self.input_path, f"{scene_id}_recordingMeta.csv")
+                fixed_blocks_file = os.path.join(self.input_path, f"{scene_id}_fixedBlocks.csv")
+                visibility_file = os.path.join(self.input_path, f"{scene_id}_visibilityData.csv")
+
+                tracks, tracks_meta, recording_meta, fixed_blocks_info = read_from_csv(
+                    tracks_file, tracks_meta_file, recording_meta_file, fixed_blocks_file, include_px_coordinates=True
+                )
+
+                visibility_df = pd.read_csv(visibility_file)
+                self.fixed_blocks_info[int(scene_id)] = fixed_blocks_info
+
+                # Collect DataFrames
+                self.tracks.append(pd.DataFrame(tracks))
+                self.tracks_meta.append(pd.DataFrame(tracks_meta))
+                self.visibility_data.append(visibility_df)
+
+                # Store background images for scenes
+                bg_path = os.path.join(self.input_path, 'semantic_maps', f"{scene_id}_background.png")
+                img = cv2.imread(bg_path)
+                self.background_images[int(scene_id)] = img
+
+            self.config = config
+            self.input_path = config["dataset_dir"]
+            self.dataset = config["dataset"].lower()
+            self.history_length = config["history_length"]
+            self.num_features = config[
+                'num_features']  # x, y, heading, xVelocity, yVelocity, xAcceleration, yAcceleration, t
+
+            # Load dataset specific visualization parameters from file
+            dataset_params_path = Path(config["visualizer_params_dir"]) / "visualizer_params.json"
+
+            if not dataset_params_path.exists():
+                logger.error("Could not find dataset visualization parameters in {}", dataset_params_path)
+                sys.exit(-1)
+
+            with open(dataset_params_path) as f:
+                self.dataset_params = json.load(f)
+
+            if self.dataset not in self.dataset_params["datasets"]:
+                logger.error(
+                    "Visualization parameters for dataset {} not found in {}. Please make sure, that the needed "
+                    "parameters are given", self.dataset, dataset_params_path)
+                sys.exit(-1)
+
+            self.dataset_params = self.dataset_params["datasets"][self.dataset]
+            self.scale_down_factor = self.dataset_params["scale_down_factor"]
+
+            self.tracks = pd.concat(self.tracks, ignore_index=True)
+            self.tracks_meta = pd.concat(self.tracks_meta, ignore_index=True)
+            self.visibility_data = pd.concat(self.visibility_data, ignore_index=True)
+
             for scene_id in scene_ids:
                 scene_id = int(scene_id)
                 if scene_id < start_scene or scene_id > end_scene:
@@ -272,7 +286,7 @@ class OGMDataset(Dataset):
                                        data_dict["hidden_cell_polygon_xys"])
 
         # Create a black background image a size of background_img
-        blank_img = np.zeros_like(backgrond_img)
+        blank_img = np.zeros_like(backgrond_img[:, :, 0:1])  # Create a single channel image
         for cel in hidden_cell_polygon_xys:
             cv2.fillPoly(blank_img, [np.array(cel).astype(np.int32)], (255, 255, 255))
 
@@ -305,6 +319,8 @@ class OGMDataset(Dataset):
         map_resized = cv2.resize(self.background_images[scene_id], (224, 224), interpolation=cv2.INTER_AREA)
         hidden_cells_resized = cv2.resize(blank_img, (224, 224), interpolation=cv2.INTER_AREA)
 
+        historical_adjacent_no_e[:, :, 2:3] = historical_adjacent_no_e[:, :, 2:3] / 360.0  # Normalize heading to [0, 1]. This is a mistake done when extracting the data
+
         input = {
             "historical_adjacent_obs": historical_adjacent_no_e,
             "historical_ego_obs": np.array(historical_ego_obs, dtype=np.float32),
@@ -313,6 +329,7 @@ class OGMDataset(Dataset):
             "edge_weights": np.expand_dims(numpy.array(edge_weights, dtype=np.float32), axis=-1),
             "edge_index": numpy.array(edge_index, dtype=np.int64),
             "hidden_ogm_cells": hidden_ogm_cells[:, :-1],
+            "hidden_cells_resized": hidden_cells_resized.astype(np.float32),
             # "mask": mask,
         }
         target = hidden_ogm_cells[:, -1:].astype(np.float32)

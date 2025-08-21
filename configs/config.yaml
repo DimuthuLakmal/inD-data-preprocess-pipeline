@@ -1,5 +1,6 @@
 # Model Configs
 model:
+  lr: 0.005 # learning rate
   train_batch_size: 16
   test_batch_size: 16
   train_epochs: 100
@@ -35,6 +36,8 @@ model:
     dim_edge: 1
     num_heads: 8
     dropout: 0.2
+    img_ch: 4
+    output_ch: 4
 
 # Data Configs
 data:

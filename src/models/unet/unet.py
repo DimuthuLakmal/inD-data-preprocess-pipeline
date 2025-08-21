@@ -276,12 +276,12 @@ class R2U_Net(nn.Module):
 
 
 class AttU_Net(nn.Module):
-    def __init__(self, img_ch=3, output_ch=1):
+    def __init__(self, config):
         super(AttU_Net, self).__init__()
 
         self.Maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
 
-        self.Conv1 = conv_block(ch_in=img_ch, ch_out=64)
+        self.Conv1 = conv_block(ch_in=config['img_ch'], ch_out=64)
         self.Conv2 = conv_block(ch_in=64, ch_out=128)
         self.Conv3 = conv_block(ch_in=128, ch_out=256)
         self.Conv4 = conv_block(ch_in=256, ch_out=512)
@@ -303,10 +303,11 @@ class AttU_Net(nn.Module):
         self.Att2 = Attention_block(F_g=64, F_l=64, F_int=32)
         self.Up_conv2 = conv_block(ch_in=128, ch_out=64)
 
-        self.Conv_1x1 = nn.Conv2d(64, output_ch, kernel_size=1, stride=1, padding=0)
+        self.Conv_1x1 = nn.Conv2d(64, config['output_ch'], kernel_size=1, stride=1, padding=0)
 
     def forward(self, x):
-        x = x['map_obs'].permute(0, 3, 1, 2)
+        x = torch.concat([x['map_obs'], x["hidden_cells_resized"].unsqueeze(dim=-1)], dim=-1)
+        x = x.permute(0, 3, 1, 2)
 
         # encoding path
         x1 = self.Conv1(x)

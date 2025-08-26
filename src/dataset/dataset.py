@@ -46,9 +46,9 @@ class OGMDataset(Dataset):
         self.fixed_blocks_info = {}
         self.frame_to_track_idxs = {}
 
-        start_scene = 22
-        end_scene = 24
-        filename = "index_map5.pkl"
+        start_scene = 0
+        end_scene = 21
+        filename = "data.pkl"
 
         self.data_dict = {}
 
@@ -319,7 +319,13 @@ class OGMDataset(Dataset):
         map_resized = cv2.resize(self.background_images[scene_id], (224, 224), interpolation=cv2.INTER_AREA)
         hidden_cells_resized = cv2.resize(blank_img, (224, 224), interpolation=cv2.INTER_AREA)
 
+        # Normalize map and hiddden_cells_resized
+        map_resized = map_resized / 255.0  # Normalize to [0, 1]
+        hidden_cells_resized = hidden_cells_resized / 255.0  # Normalize to [0, 1]
+
         historical_adjacent_no_e[:, :, 2:3] = historical_adjacent_no_e[:, :, 2:3] / 360.0  # Normalize heading to [0, 1]. This is a mistake done when extracting the data
+        historical_adjacent_no_e[:, :, 3:] = historical_adjacent_no_e[:, :, 3:] / 10.0
+        seq_mask = np.all(historical_adjacent_no_e == 0, axis=-1)  # Create a sequence mask where all features are zeros
 
         input = {
             "historical_adjacent_obs": historical_adjacent_no_e,
@@ -330,7 +336,8 @@ class OGMDataset(Dataset):
             "edge_index": numpy.array(edge_index, dtype=np.int64),
             "hidden_ogm_cells": hidden_ogm_cells[:, :-1],
             "hidden_cells_resized": hidden_cells_resized.astype(np.float32),
-            # "mask": mask,
+            "seq_mask": seq_mask,
+            "scene_id": scene_id,
         }
         target = hidden_ogm_cells[:, -1:].astype(np.float32)
 

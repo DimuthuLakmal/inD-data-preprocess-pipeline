@@ -8,6 +8,8 @@ from src.models.spatio_temporal_encoder import SGATTransformer
 from src.models.transformer.graph_weight_encoder import GraphWeightEncoder
 import torch.nn as nn
 
+from src.utils.histogram import plot_histogram
+
 
 def create_args():
     cs = argparse.ArgumentParser(description="Dataset Tracks Visualizer")
@@ -33,8 +35,14 @@ def train(model, data_loader, config):
     optimizer.zero_grad()
     loss_fn = nn.BCELoss()
 
+    if config['model']['use_lr_scheduler']:
+        lambda1 = lambda epoch: 0.9 ** epoch
+        lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
+
+    first_batch = True
+
     for epoch in range(config['model']['train_epochs']):  # Example: 10 epochs
-        for batch_idx, (inputs, target) in enumerate(data_loader):
+        for batch_idx, (inputs, target, scene_ids) in enumerate(data_loader):
 
             # Move data to the correct device
             targets = target.to(config['model']["device"])
@@ -43,7 +51,8 @@ def train(model, data_loader, config):
                     inputs[k] = v.to(config['model']["device"])
 
             mask = inputs['mask']  # Mask indicates the non-padded cells (1: valid, 0: padded)
-            outputs = model(inputs, ~mask).squeeze()
+            seq_mask = inputs['seq_mask']  # Sequence mask for the historical observations
+            outputs = model(inputs, seq_mask).squeeze()
 
             # Calculate the binary cross-entropy loss
             # Masking is applied to ignore unwanted cells
@@ -59,7 +68,34 @@ def train(model, data_loader, config):
             optimizer.step()
 
             if batch_idx % 10 == 0:  # Log every 10 batches
-                print(f'Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}')
+                print(f'Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}, Items: {torch.sum(mask.int())}')
+
+                connections = 0
+                for edge_weight in inputs['edge_weights']:
+                    connections += edge_weight.shape[0]
+
+                print('Connections: {}, avg nodes: {}'.format(connections, (connections/torch.sum(mask.int())).item()))
+
+                map_1, map_2, map_3 = 0, 0, 0
+                # if not first_batch:
+                    # for id in scene_ids:
+                    #     if id <= 6:
+                    #         map_1 += 1
+                    #     elif 7 <= id <= 17:
+                    #         map_2 += 1
+                    #     else:
+                    #         map_3 += 1
+                    # print('Map 1: {}, Map 2: {}, Map 3: {}, Loss: {}'.format(map_1, map_2, map_3, loss.item()))
+                # else:
+                #     first_batch = False
+
+                # if not first_batch:
+                #     plot_histogram(inputs['historical_adjacent_obs'], loss.item())
+                # else:
+                #     first_batch = False
+
+        if config['model']['use_lr_scheduler']:
+            lr_scheduler.step()
 
 
 if __name__ == '__main__':

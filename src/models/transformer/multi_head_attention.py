@@ -32,7 +32,7 @@ class MultiHeadAttention(nn.Module):
         self.out_proj = nn.Linear(model_dim, model_dim)
 
 
-    def forward(self, query, key, value):
+    def forward(self, query, key, value, seq_mask=None):
         # Q    (batch_size, ..., tgt_length, model_dim)
         # K, V (batch_size, ..., src_length, model_dim)
         batch_size = query.shape[0]
@@ -56,11 +56,26 @@ class MultiHeadAttention(nn.Module):
                              query @ key
                      ) / self.head_dim ** 0.5  # (num_heads * batch_size, ..., tgt_length, src_length)
 
+        # This is for autoregressive masking
         if self.mask:
             mask = torch.ones(
                 tgt_length, src_length, dtype=torch.bool, device=query.device
             ).tril()  # lower triangular part of the matrix
             attn_score.masked_fill_(~mask, -torch.inf)  # fill in-place
+
+        # This is for padding mask
+        if seq_mask is not None:
+            if seq_mask.dtype != torch.bool:
+                attn_score = seq_mask.bool()
+            # Expand across extra dims (the '...' between batch and length)
+            # extra_ndims = query.ndim - 3  # (B, ..., T, D) -> number of "..." dims
+            kpm = seq_mask.unsqueeze(dim=-2)  # (B, 1, Tk)
+            # for _ in range(extra_ndims):
+            #     kpm = kpm.unsqueeze(1)          # (B, ..., 1, Tk)
+            # Now expand heads in the folded batch dimension
+            kpm = kpm.repeat_interleave(self.num_heads, dim=0)  # (H*B, ..., 1, Tk)
+            attn_score = attn_score.masked_fill(kpm, float('-inf'))
+
 
         attn_score = torch.softmax(attn_score, dim=-1)
         out = attn_score @ value  # (num_heads * batch_size, ..., tgt_length, head_dim)

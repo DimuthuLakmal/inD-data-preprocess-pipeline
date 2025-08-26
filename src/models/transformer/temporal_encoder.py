@@ -45,7 +45,7 @@ class TemporalEncoder(nn.Module):
         self.attn_pool = AttentionPool(dim_model)
         self.fc_out = nn.Linear(dim_model, out_dim)
 
-    def forward(self, x):
+    def forward(self, x, mask=None):
         x_adjacent_hist = x['historical_adjacent_obs']
 
         x = self.hist_emb(x_adjacent_hist)
@@ -67,7 +67,7 @@ class TemporalEncoder(nn.Module):
 
         for enc_layer in self.layers:
             q, v, k = out_e, out_e, out_e
-            out_e = enc_layer(q, k, v)
+            out_e = enc_layer(q, k, v, mask)
 
         out_e = self.attn_pool(out_e)
 

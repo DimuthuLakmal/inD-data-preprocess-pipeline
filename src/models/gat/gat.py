@@ -205,6 +205,13 @@ class GATv2Conv(MessagePassing):
         else:
             self.register_parameter('bias', None)
 
+        self.gate_mlp = torch.nn.Sequential(
+            torch.nn.Linear(2 * out_channels, out_channels),
+            torch.nn.ReLU(),
+            torch.nn.Linear(out_channels, 1),
+            torch.nn.Sigmoid()  # Ensures output is between 0 and 1
+        )
+
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -349,6 +356,13 @@ class GATv2Conv(MessagePassing):
 
         x = F.leaky_relu(x, self.negative_slope)
         alpha = (x * self.att).sum(dim=-1)
+
+        # --- Soft gating mechanism ---
+        x_pair = torch.cat([x_i, x_j], dim=-1)  # shape: [E, H, 2C]
+        z_gate = self.gate_mlp(x_pair.view(-1, 2 * self.out_channels))  # shape: [E * H, 1]
+        z_gate = z_gate.view(-1, self.heads)  # shape: [E, H]
+        alpha = alpha * z_gate  # Apply soft gate to attention
+
         alpha = softmax(alpha, index, ptr, dim_size)
         alpha = F.dropout(alpha, p=self.dropout, training=self.training)
         return alpha

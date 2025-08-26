@@ -43,7 +43,7 @@ class GraphWeightEncoder(nn.Module):
 
         self.fc_out = nn.Linear(dim_model, out_dim)
 
-    def forward(self, x):
+    def forward(self, x, seq_mask=None):
         x_adjacent_hist = x['historical_adjacent_obs']
         # x_ego_hist = x['historical_ego_obs'].to(self.device)
         # x_hist = torch.cat((x_ego_hist.unsqueeze(dim=1), x_adjacent_hist), dim=1)
@@ -63,7 +63,7 @@ class GraphWeightEncoder(nn.Module):
             q = q.reshape(out_e_shp[0], out_e_shp[1], out_e_shp[2], out_e_shp[3])
             v = v.reshape(out_e_shp[0], out_e_shp[1], out_e_shp[2], out_e_shp[3])
             k = k.reshape(out_e_shp[0], out_e_shp[1], out_e_shp[2], out_e_shp[3])
-            out_e = enc_layer(q, k, v)
+            out_e = enc_layer(q, k, v, seq_mask)
 
         graph_w = out_e.permute(0, 2, 1, 3)
 

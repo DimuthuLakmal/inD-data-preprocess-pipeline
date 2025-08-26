@@ -18,9 +18,9 @@ class EncoderBlock(nn.Module):
         self.dropout1 = nn.Dropout(src_dropout)
         self.dropout2 = nn.Dropout(ff_dropout)
 
-    def forward(self, query, key, value):
+    def forward(self, query, key, value, mask=None):
         # self attention
-        attention_out = self.attention(query, key, value)  # 32x10x512
+        attention_out = self.attention(query, key, value, mask)  # 32x10x512
 
         # add and normalization
         attention_residual_out = self.dropout1(attention_out) + value  # 32x10x512

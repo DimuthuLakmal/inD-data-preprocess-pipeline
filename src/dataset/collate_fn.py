@@ -54,6 +54,7 @@ def custom_collate(batch):
             # Pad the tensors in the dictionary to the maximum length
             return_d['historical_adjacent_obs'] = _pad_batch(return_d['historical_adjacent_obs'])
             return_d['hidden_ogm_cells'] = _pad_batch(return_d['hidden_ogm_cells'])
+            return_d['seq_mask'] = _pad_batch(return_d['seq_mask'])
 
             # convert list of tensors to a torch tensor
             for key in return_d.keys():
@@ -84,6 +85,8 @@ def custom_collate(batch):
         else:
             raise TypeError(f"Unsupported type: {type(elem)}")
 
+    # Collate inputs
+    scene_ids = [inp.pop("scene_id") for inp in inputs]
     collated_inputs = collate_elem(inputs)
 
     # Collate targets
@@ -92,4 +95,4 @@ def custom_collate(batch):
         target_collated.append(collate_elem(target))
     collated_targets = torch.stack(_pad_batch(target_collated))  # Stack and pad targets
 
-    return collated_inputs, collated_targets
+    return collated_inputs, collated_targets, scene_ids

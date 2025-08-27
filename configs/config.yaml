@@ -5,12 +5,12 @@ model:
   train_batch_size: 16
   test_batch_size: 16
   train_epochs: 100
-  model_output_path: "output/model/pems08/epoch_{}_model.pt" # save trained model to this path
+  model_output_path: "../results/checkpoints/final.pt" # save trained model to this path
   load_saved_model: False # if you want pre-trained model weights to be loaded
   model_input_path: "output/model/pems08/epoch_58_model.pt" # pretrained model path
   device: cuda # decides GPU or CPU for training
   graph_weight_encoder:
-    dim_model: 32 # dimension that embedding layer maps the input of the model to.
+    dim_model: 64 # dimension that embedding layer maps the input of the model to.
     seq_len: 21 # input sequence length
     input_dim: 8 # input dimension, inputs is traffic flow value, in some dataset it may be combined with time index
     num_layers: 4 # # of temporal encoder layers
@@ -18,7 +18,7 @@ model:
     dropout_e_normal: 0.0 # dropout applied to the final output of temporal encoder layer of the first encoder
     dropout_e_rep: 0.2 # dropout applied to the final output of temporal encoder layer of the second encoder (representative time sequence)
   temporal_encoder:
-    dim_model: 32 # dimension that embedding layer maps the input of the model to.
+    dim_model: 64 # dimension that embedding layer maps the input of the model to.
     seq_len: 21 # input sequence length
     input_dim: 8 # input dimension, inputs is traffic flow value, in some dataset it may be combined with time index
     num_layers: 4 # # of temporal encoder layers
@@ -27,7 +27,7 @@ model:
     dropout_e_rep: 0.2 # dropout applied to the final output of temporal encoder layer of the second encoder (representative time sequence)
   gat:
     ogm_input_dim: 2
-    dim_model: 32
+    dim_model: 64
     dim_edge: 1
     num_heads: 8
     dropout: 0.2

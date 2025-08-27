@@ -97,6 +97,9 @@ def train(model, data_loader, config):
         if config['model']['use_lr_scheduler']:
             lr_scheduler.step()
 
+    # Save the final model checkpoint
+    torch.save(model.state_dict(), config['model']['model_output_path'])
+
 
 if __name__ == '__main__':
     with open("../configs/config.yaml", "r") as stream:

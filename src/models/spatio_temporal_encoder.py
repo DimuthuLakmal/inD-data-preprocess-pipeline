@@ -3,6 +3,7 @@ from torch import nn
 
 from src.models.gat.gat_layer import GATLayer
 from src.models.transformer.cell_guided_cross_attention import CellGuidedCrossAttention
+from src.models.transformer.expert_gating import TwoExpertGatedFusion
 from src.models.transformer.graph_weight_encoder import GraphWeightEncoder
 from src.models.transformer.map_encoder_attn import MapEncoderAttention
 from src.models.transformer.temporal_encoder import TemporalEncoder
@@ -26,7 +27,7 @@ class SGATTransformer(nn.Module):
 
         gat_configs = configs['gat']
         self.gat_layer = GATLayer(gat_configs)
-        self.fc_gat_out = nn.Linear(32, 1)
+        self.fc_gat_out = nn.Linear(64, 1)
 
         unet_configs = configs['unet']
         self.unet = AttU_Net(config=unet_configs)
@@ -40,9 +41,11 @@ class SGATTransformer(nn.Module):
         #                                       xy_dim=2,
         #                                       use_pos_enc=True)
 
+        self.expert_gating = TwoExpertGatedFusion(64)
+
         self.map_encoder_atten = MapEncoderAttention(256, 32, d=64)
 
-        self.map_encoder = MapEncoder(model_arch='resnet50', input_image_shape=(4, 224, 224), global_feature_dim=256)
+        self.map_encoder = MapEncoder(model_arch='resnet50', input_image_shape=(4, 224, 224), global_feature_dim=64)
 
     def reset_parameters(self):
         """Reset parameters of the model."""
@@ -60,7 +63,11 @@ class SGATTransformer(nn.Module):
         map_output = self.map_encoder(x)[0]
 
         ### These are just testing lines, not concrete implementations
-        # map_output = map_output.unsqueeze(dim=1).repeat_interleave(gat_out.shape[1], dim=1)
+        map_output = map_output.unsqueeze(dim=1).repeat_interleave(gat_out.shape[1], dim=1)
+
+        fused = self.expert_gating(map_output, gat_out)
+        gat_out_fc = self.fc_gat_out(fused)
+
         # # combine map and GAT features
         # combined = torch.cat([map_output, gat_out], dim=-1)
         # gat_out_fc = self.fc_gat_out(map_output)

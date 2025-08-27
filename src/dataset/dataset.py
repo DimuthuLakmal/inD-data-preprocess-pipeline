@@ -47,7 +47,7 @@ class OGMDataset(Dataset):
         self.frame_to_track_idxs = {}
 
         start_scene = 0
-        end_scene = 21
+        end_scene = 1
         filename = "data.pkl"
 
         self.data_dict = {}

@@ -14,16 +14,70 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 
 
-def draw_frame(map_img, vehicle_data, timestep, save_path=None):
+def _rot2d(theta):
+    c, s = np.cos(theta), np.sin(theta)
+    return np.array([[c, -s],
+                     [s,  c]])
+
+def get_vert(x, y, heading, length=10.0, width=10.0):
+    """
+    Returns Nx2 array of polygon vertices for a rectangle centered at (x, y)
+    rotated by `heading` (radians). length/width are in the same units as x,y.
+    """
+    # rectangle corners in the vehicle's local frame (centered at origin)
+    L, W = length, width
+    local = np.array([
+        [+L / 2, +W / 2],
+        [+L / 2, -W / 2],
+        [-L / 2, -W / 2],
+        [-L / 2, +W / 2],
+    ])
+
+    R = _rot2d(heading)
+    return (local @ R.T) + np.array([x, y])
+
+def draw_cells(ax, x, y, heading, label, cell_size=20, as_center=True):
+    """
+    cells: list of tuples (x, y, is_black) where is_black ∈ {0,1}
+           x,y in the same pixel coord system as your map.
+    cell_size: side length in pixels.
+    as_center: True if (x,y) is the cell center; False if it's top-left.
+    """
+
+    verts = get_vert(x, y, heading, length=cell_size, width=cell_size)
+    face = 'black' if label else 'white'
+    edge = 'white' if label else 'black'
+    ax.add_patch(patches.Polygon(verts, closed=True,
+                                 facecolor=face))
+
+
+def draw_poly(ax, vehicle, color, timestep, map_img=None):
+    x, y, heading, ax_, ay_ = vehicle[timestep][0], vehicle[timestep][1], vehicle[timestep][2], vehicle[timestep][
+            3], vehicle[timestep][4]
+    x = x * map_img.shape[1]
+    y = y * map_img.shape[0]
+    verts = get_vert(x, y, heading)
+    ax.add_patch(patches.Polygon(verts, closed=True, facecolor=color,
+                                     edgecolor=color, linewidth=0.8))
+
+
+def draw_frame(map_img, adj_vehicle_data, ego_vehicle_data, cells, timestep, num_timesteps, save_path=None):
+
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.imshow(map_img)
 
-    for seq in vehicle_data:
-        if timestep < len(seq):
-            x, y, heading, ax_, ay_ = seq[timestep]
-            rect = patches.FancyArrow(x, y, 10*np.cos(heading), 10*np.sin(heading),
-                                      width=1, color='red')
-            ax.add_patch(rect)
+    # Draw cells ONLY on the last timestep
+    if (cells is not None) and (timestep == num_timesteps - 1):
+        for cell in cells:
+            x = cell[0] * map_img.shape[1]
+            y = cell[1] * map_img.shape[0]
+            label = cell[2]
+            draw_cells(ax, x, y, ego_vehicle_data[timestep][2], label, cell_size=20, as_center=True)
+
+    for vehicle in adj_vehicle_data:
+        draw_poly(ax, vehicle, 'brown', timestep, map_img)
+
+    draw_poly(ax, ego_vehicle_data, 'black', timestep, map_img)
 
     ax.set_axis_off()
     fig.tight_layout()
@@ -33,6 +87,8 @@ def draw_frame(map_img, vehicle_data, timestep, save_path=None):
         plt.close(fig)
     else:
         plt.show()
+
+    print("Frame drawn")
 
 
 scene_ids = set()
@@ -92,20 +148,13 @@ for idx in range(len(keys)):
 
     # Historical observations
     historical_adjacent_obs, historical_ego_obs = data_dict["historical_adjacent_obs"], data_dict["historical_ego_obs"]
-
-    vehicle_data = []
-    for historical_adjacent_ob in historical_adjacent_obs.values():
-        x = historical_adjacent_ob[0] * backgrond_img.shape[1]
-        y = historical_adjacent_ob[1] * backgrond_img.shape[0]
-        heading = historical_adjacent_ob[2]
-        ax = historical_adjacent_ob[3]
-        ay = historical_adjacent_ob[4]
-        vehicle_data.append((x, y, heading, ax, ay))
+    hidden_ogm_cells = data_dict["hidden_ogm_cells"]
 
     num_timesteps = 21
 
     for t in range(num_timesteps):
-        draw_frame(map_img, vehicle_data, t, save_path=f"frames/frame_{t:03d}.png")
+        draw_frame(backgrond_img, historical_adjacent_obs.values(), historical_ego_obs, hidden_ogm_cells, t,
+                   num_timesteps)
 
     image_folder = 'frames'
     video_name = 'vehicle_animation.mp4'
@@ -148,8 +197,3 @@ def interactive_playback(image_folder, total_frames):
 
 # Run interactive viewer
 interactive_playback("frames", num_timesteps)
-
-
-
-
-

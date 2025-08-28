@@ -33,7 +33,8 @@ def train(model, data_loader, config):
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config['model']['lr'])
     optimizer.zero_grad()
-    loss_fn = nn.BCELoss()
+    loss_fn = nn.BCELoss(reduce=False)
+    loss_fn_aggregated = nn.BCELoss()
 
     if config['model']['use_lr_scheduler']:
         lambda1 = lambda epoch: 0.9 ** epoch
@@ -53,22 +54,25 @@ def train(model, data_loader, config):
             mask = inputs['mask']  # Mask indicates the non-padded cells (1: valid, 0: padded)
             seq_mask = inputs['seq_mask']  # Sequence mask for the historical observations
             outputs = model(inputs, seq_mask).squeeze()
+            outputs = nn.Sigmoid()(outputs)
 
             # Calculate the binary cross-entropy loss
             # Masking is applied to ignore unwanted cells
             targets = targets.squeeze() * mask  # Apply mask to targets
+            outputs = outputs * mask  # Apply mask to outputs
 
             mask_fixed_blocks = (targets != 3)
             targets = targets * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not occupied
 
-            loss = loss_fn(nn.Sigmoid()(outputs), targets)
+            loss_aggregated = loss_fn_aggregated(outputs, targets)
+            loss = loss_fn(outputs, targets)
 
             optimizer.zero_grad()
-            loss.backward()
+            loss_aggregated.backward()
             optimizer.step()
 
             if batch_idx % 10 == 0:  # Log every 10 batches
-                print(f'Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item()}, Items: {torch.sum(mask.int())}')
+                print(f'Epoch {epoch}, Batch {batch_idx}, Loss: {loss_aggregated.item()}, Items: {torch.sum(mask.int())}')
 
                 connections = 0
                 for edge_weight in inputs['edge_weights']:

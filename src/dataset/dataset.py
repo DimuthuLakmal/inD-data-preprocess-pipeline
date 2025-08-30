@@ -47,7 +47,7 @@ class OGMDataset(Dataset):
         self.frame_to_track_idxs = {}
 
         start_scene = 0
-        end_scene = 21
+        end_scene = 27
         filename = "data.pkl"
 
         self.data_dict = {}
@@ -151,7 +151,7 @@ class OGMDataset(Dataset):
                 # We have to find out timesteps that have atleast one hidden record in the visiblity data.
                 # We cannot start from the minimum_frame as we have to include the history as well.
                 for i_frame in range(minimum_frame + self.history_length, maximum_frame,
-                                     (self.history_length * 2)):
+                                     (self.history_length)):
 
                     hidden_objects = visibility_data[(visibility_data['frame'] == i_frame) &
                                                      (visibility_data['visibility'] == False) &
@@ -337,7 +337,8 @@ class OGMDataset(Dataset):
             "hidden_ogm_cells": hidden_ogm_cells[:, :-1],
             "hidden_cells_resized": hidden_cells_resized.astype(np.float32),
             "seq_mask": seq_mask,
-            "scene_id": scene_id,
+            "keys": keys,
+            "background_image": gt_background_img
         }
         target = hidden_ogm_cells[:, -1:].astype(np.float32)
 

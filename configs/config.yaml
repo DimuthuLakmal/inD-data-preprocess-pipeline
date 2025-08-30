@@ -1,6 +1,6 @@
 # Model Configs
 model:
-  lr: 0.001 # learning rate
+  lr: 0.0005 # learning rate
   use_lr_scheduler: True # if you want to use learning rate scheduler
   train_batch_size: 16
   test_batch_size: 16

@@ -34,7 +34,7 @@ def train(model, data_loader, config):
     optimizer = torch.optim.Adam(model.parameters(), lr=config['model']['lr'])
     optimizer.zero_grad()
     loss_fn = nn.BCELoss(reduce=False)
-    loss_fn_aggregated = nn.BCELoss()
+    loss_fn_aggregated = nn.BCEWithLogitsLoss(reduction='none')
 
     if config['model']['use_lr_scheduler']:
         lambda1 = lambda epoch: 0.9 ** epoch
@@ -43,7 +43,7 @@ def train(model, data_loader, config):
     first_batch = True
 
     for epoch in range(config['model']['train_epochs']):  # Example: 10 epochs
-        for batch_idx, (inputs, target, scene_ids) in enumerate(data_loader):
+        for batch_idx, (inputs, target, keys, imgs) in enumerate(data_loader):
 
             # Move data to the correct device
             targets = target.to(config['model']["device"])
@@ -54,18 +54,21 @@ def train(model, data_loader, config):
             mask = inputs['mask']  # Mask indicates the non-padded cells (1: valid, 0: padded)
             seq_mask = inputs['seq_mask']  # Sequence mask for the historical observations
             outputs = model(inputs, seq_mask).squeeze()
-            outputs = nn.Sigmoid()(outputs)
+            outputs_sig = nn.Sigmoid()(outputs)
 
             # Calculate the binary cross-entropy loss
             # Masking is applied to ignore unwanted cells
-            targets = targets.squeeze() * mask  # Apply mask to targets
-            outputs = outputs * mask  # Apply mask to outputs
+            mask_fixed_blocks = (targets != 3).squeeze()  # Cells occupied with fixed blocks are marked with a 3 in the target
+            mask = mask * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not padded
 
-            mask_fixed_blocks = (targets != 3)
-            targets = targets * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not occupied
+            targets = targets.squeeze() * mask
+            outputs = outputs * mask  # Apply mask to outputs
+            outputs_sig = outputs_sig * mask  # Apply mask to outputs
 
             loss_aggregated = loss_fn_aggregated(outputs, targets)
-            loss = loss_fn(outputs, targets)
+            loss_aggregated = loss_aggregated * mask
+            loss_aggregated = loss_aggregated.sum() / (mask.sum().clamp_min(1))
+            loss = loss_fn(outputs_sig.view(-1), targets.view(-1))
 
             optimizer.zero_grad()
             loss_aggregated.backward()

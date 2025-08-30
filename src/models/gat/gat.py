@@ -3,7 +3,7 @@ from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
-from torch import Tensor
+from torch import Tensor, nn
 from torch.nn import Parameter
 
 from torch_geometric.nn.dense.linear import Linear
@@ -216,12 +216,17 @@ class GATv2Conv(MessagePassing):
 
     def reset_parameters(self):
         super().reset_parameters()
-        self.lin_l.reset_parameters()
-        self.lin_r.reset_parameters()
+        nn.init.uniform_(self.lin_l.weight, a=-1.0, b=1.0)
+        nn.init.uniform_(self.lin_r.weight, a=-1.0, b=1.0)
+
+        # self.lin_l.reset_parameters()
+        # self.lin_r.reset_parameters()
         if self.lin_edge is not None:
-            self.lin_edge.reset_parameters()
+            # self.lin_edge.reset_parameters()
+            nn.init.uniform_(self.lin_edge.weight, a=-1.0, b=1.0)
         if self.res is not None:
-            self.res.reset_parameters()
+            nn.init.uniform_(self.res.weight, a=-1.0, b=1.0)
+            # self.res.reset_parameters()
         glorot(self.att)
         zeros(self.bias)
 
@@ -358,13 +363,14 @@ class GATv2Conv(MessagePassing):
         alpha = (x * self.att).sum(dim=-1)
 
         # --- Soft gating mechanism ---
-        x_pair = torch.cat([x_i, x_j], dim=-1)  # shape: [E, H, 2C]
-        z_gate = self.gate_mlp(x_pair.view(-1, 2 * self.out_channels))  # shape: [E * H, 1]
-        z_gate = z_gate.view(-1, self.heads)  # shape: [E, H]
-        alpha = alpha * z_gate  # Apply soft gate to attention
+        # x_pair = torch.cat([x_i, x_j], dim=-1)  # shape: [E, H, 2C]
+        # z_gate = self.gate_mlp(x_pair.view(-1, 2 * self.out_channels))  # shape: [E * H, 1]
+        # z_gate = z_gate.view(-1, self.heads)  # shape: [E, H]
+        # alpha = alpha * z_gate  # Apply soft gate to attention
 
         alpha = softmax(alpha, index, ptr, dim_size)
         alpha = F.dropout(alpha, p=self.dropout, training=self.training)
+
         return alpha
 
     def message(self, x_j: Tensor, alpha: Tensor) -> Tensor:

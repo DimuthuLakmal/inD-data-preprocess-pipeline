@@ -29,8 +29,8 @@ class SGATTransformer(nn.Module):
         self.gat_layer = GATLayer(gat_configs)
         self.fc_gat_out = nn.Linear(64, 1)
 
-        unet_configs = configs['unet']
-        self.unet = AttU_Net(config=unet_configs)
+        # unet_configs = configs['unet']
+        # self.unet = AttU_Net(config=unet_configs)
 
         # self.xattn = CellGuidedCrossAttention(unet_channels=unet_configs['output_ch'],
         #                                       q_dim=gat_configs['dim_model'],
@@ -46,32 +46,39 @@ class SGATTransformer(nn.Module):
         self.map_encoder_atten = MapEncoderAttention(256, 32, d=64)
 
         self.map_encoder = MapEncoder(model_arch='resnet50', input_image_shape=(4, 224, 224), global_feature_dim=64)
+        self.map_encoder2 = MapEncoder(model_arch='resnet18', input_image_shape=(3, 224, 224), global_feature_dim=32)
 
     def reset_parameters(self):
         """Reset parameters of the model."""
-        torch.nn.init.xavier_uniform_(self.fc_gat_out.weight)
+        nn.init.uniform_(self.fc_gat_out.weight, a=-1.0, b=1.0)
         # TODO: since the classes are not balanced, the weights can be initialized as pos/total
 
     def forward(self, x, seq_mask=None):
         x_gwe = self.gw_encoder(x, seq_mask)
-        x_te = self.temporal_encoder(x, seq_mask)
+        x_te = self.temporal_encoder(x, None)
 
-        gat_out = self.gat_layer(x_te, x_gwe, x)
+        # unet_out = self.unet(x)
+        map_inputs = x['map_obs'].permute(0, 3, 1, 2)
+        map_output = self.map_encoder2(map_inputs)[0]
+
+        gat_out = self.gat_layer(x_te, x_gwe, x, map_output)
         gat_out_fc = self.fc_gat_out(gat_out)
 
         # unet_out = self.unet(x)
-        map_output = self.map_encoder(x)[0]
+        # map_inputs = torch.concat([x['map_obs'], x["hidden_cells_resized"].unsqueeze(dim=-1)], dim=-1)
+        # map_inputs = map_inputs.permute(0, 3, 1, 2)
+        # map_output = self.map_encoder(map_inputs)[0]
+        #
+        # ### These are just testing lines, not concrete implementations
+        # map_output = map_output.unsqueeze(dim=1).repeat_interleave(gat_out.shape[1], dim=1)
 
-        ### These are just testing lines, not concrete implementations
-        map_output = map_output.unsqueeze(dim=1).repeat_interleave(gat_out.shape[1], dim=1)
+        # fused = self.expert_gating(map_output, gat_out)
+        # gat_out_fc = self.fc_gat_out(fused)
 
-        fused = self.expert_gating(map_output, gat_out)
-        gat_out_fc = self.fc_gat_out(fused)
-
-        # # combine map and GAT features
+        # combine map and GAT features
         # combined = torch.cat([map_output, gat_out], dim=-1)
         # gat_out_fc = self.fc_gat_out(map_output)
-        ### end testing lines
+        ## end testing lines
 
         cell_xy = x['hidden_ogm_cells']
         # fused_cells, attn_maps = self.xattn(map_output, gat_out, cell_xy=cell_xy,

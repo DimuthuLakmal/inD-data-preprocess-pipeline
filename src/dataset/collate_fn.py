@@ -86,7 +86,8 @@ def custom_collate(batch):
             raise TypeError(f"Unsupported type: {type(elem)}")
 
     # Collate inputs
-    scene_ids = [inp.pop("scene_id") for inp in inputs]
+    keys = [inp.pop("keys") for inp in inputs]
+    background_images = [inp.pop("background_image") for inp in inputs]
     collated_inputs = collate_elem(inputs)
 
     # Collate targets
@@ -95,4 +96,4 @@ def custom_collate(batch):
         target_collated.append(collate_elem(target))
     collated_targets = torch.stack(_pad_batch(target_collated))  # Stack and pad targets
 
-    return collated_inputs, collated_targets, scene_ids
+    return collated_inputs, collated_targets, keys, background_images

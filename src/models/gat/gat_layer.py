@@ -21,10 +21,12 @@ class GATLayer(nn.Module):
 
         self.hoc_emb = nn.Linear(config['ogm_input_dim'], dim_model)
 
-    def forward(self, x_te_batch, x_gwe_batch, x_batch):
+    def forward(self, x_te_batch, x_gwe_batch, x_batch, map_output):
         edge_attr_batch, edge_index_batch, hidden_ogm_cells = x_batch['edge_weights'], x_batch['edge_index'], x_batch[
             'hidden_ogm_cells']
         x_hoc_batch = self.hoc_emb(hidden_ogm_cells)
+        map_output = torch.repeat_interleave(map_output.unsqueeze(dim=1), repeats=x_hoc_batch.shape[1], dim=1)
+        # x_hoc_batch = torch.concat([x_hoc_batch, map_output], dim=-1)
 
         gat_out_batch = []
         for (x_te, x_gwe, x_hoc, edge_index, edge_attr) in zip(x_te_batch, x_gwe_batch, x_hoc_batch, edge_index_batch, edge_attr_batch):

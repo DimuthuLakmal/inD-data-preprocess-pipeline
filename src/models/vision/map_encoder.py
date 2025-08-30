@@ -48,11 +48,8 @@ class MapEncoder(nn.Module):
         return (H * dim_scale, W * dim_scale )
 
     def forward(self, x, encoder_feats=None):
-        map_inputs = torch.concat([x['map_obs'], x["hidden_cells_resized"].unsqueeze(dim=-1)], dim=-1)
-        map_inputs = map_inputs.permute(0, 3, 1, 2)
-
         if encoder_feats is None:
-            encoder_feats = self.encoder_heads(map_inputs)
+            encoder_feats = self.encoder_heads(x)
         fc_out = encoder_feats['fc'] if self.return_global_feat else None
         encoder_feats = [encoder_feats[k] for k in ["layer1", "layer2", "layer3", "layer4"]]
         feat_map_out = None

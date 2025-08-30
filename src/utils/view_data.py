@@ -36,7 +36,7 @@ def get_vert(x, y, heading, length=10.0, width=10.0):
     R = _rot2d(heading)
     return (local @ R.T) + np.array([x, y])
 
-def draw_cells(ax, x, y, heading, label, cell_size=20, as_center=True):
+def draw_cells(ax, x, y, heading, cell_size=20, as_center=True, color=None):
     """
     cells: list of tuples (x, y, is_black) where is_black ∈ {0,1}
            x,y in the same pixel coord system as your map.
@@ -45,10 +45,9 @@ def draw_cells(ax, x, y, heading, label, cell_size=20, as_center=True):
     """
 
     verts = get_vert(x, y, heading, length=cell_size, width=cell_size)
-    face = 'black' if label else 'white'
-    edge = 'white' if label else 'black'
+
     ax.add_patch(patches.Polygon(verts, closed=True,
-                                 facecolor=face))
+                                 facecolor=color))
 
 
 def draw_poly(ax, vehicle, color, timestep, map_img=None):
@@ -61,18 +60,27 @@ def draw_poly(ax, vehicle, color, timestep, map_img=None):
                                      edgecolor=color, linewidth=0.8))
 
 
-def draw_frame(map_img, adj_vehicle_data, ego_vehicle_data, cells, timestep, num_timesteps, save_path=None):
+def draw_frame(map_img, adj_vehicle_data, ego_vehicle_data, cells, targets, masks, losses, timestep, num_timesteps, save_path=None):
 
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.imshow(map_img)
 
     # Draw cells ONLY on the last timestep
     if (cells is not None) and (timestep == num_timesteps - 1):
-        for cell in cells:
+        for i, (cell, target, mask) in enumerate(zip(cells, targets, masks)):
             x = cell[0] * map_img.shape[1]
             y = cell[1] * map_img.shape[0]
-            label = cell[2]
-            draw_cells(ax, x, y, ego_vehicle_data[timestep][2], label, cell_size=20, as_center=True)
+            label = target
+            if mask and losses is None:
+                color = 'black' if label == 1 else 'white'
+                draw_cells(ax, x, y, ego_vehicle_data[timestep][2], cell_size=20, color=color)
+            elif mask and losses is not None:
+                loss_color = losses[i]/2
+                if loss_color > 1:
+                    loss_color = 1
+                color = (loss_color, 0, 0, 1)
+                draw_cells(ax, x, y, ego_vehicle_data[timestep][2], cell_size=20, color=color)
+
 
     for vehicle in adj_vehicle_data:
         draw_poly(ax, vehicle, 'brown', timestep, map_img)
@@ -91,87 +99,57 @@ def draw_frame(map_img, adj_vehicle_data, ego_vehicle_data, cells, timestep, num
     print("Frame drawn")
 
 
-scene_ids = set()
-for fname in os.listdir("../data"):
-    match = re.match(r"(\d+)_.*\.csv", fname)
-    if match:
-        scene_ids.add(match.group(1))
+def convert_to_images(keys, data_dict, background_images, targets, masks, losses):
+    for i, (key, target, mask, loss) in enumerate(zip(keys, targets, masks, losses)):
+        scene_id = int(key[0])
+        current_frame = int(key[1])
+        ego_vehicle_track_idx = int(key[2])
 
-scene_ids = sorted(scene_ids)
-print(f"Found scenes: {scene_ids}")
+        # map
+        backgrond_img = background_images[i]
 
-input_path = "../data"
+        # Historical observations
+        historical_adjacent_obs, historical_ego_obs = data_dict["historical_adjacent_obs"][i], data_dict[
+            "historical_ego_obs"][i]
+        hidden_ogm_cells = data_dict["hidden_ogm_cells"][i]
 
-tracks = []
-tracks_meta = []
-visibility_data = []
-background_images = {}
-fixed_blocks_info = {}
-frame_to_track_idxs = {}
+        num_timesteps = 21
 
-start_scene = 0
-end_scene = 21
-filename = "data.pkl"
+        historical_adjacent_obs = historical_adjacent_obs.detach().cpu().numpy()
+        historical_ego_obs = historical_ego_obs.detach().cpu().numpy()
+        hidden_ogm_cells = hidden_ogm_cells.detach().cpu().numpy()
+        target = target.detach().cpu().numpy()
+        mask = mask.detach().cpu().numpy()
+        loss = loss.detach().cpu().numpy()
 
-data_dict = {}
+        historical_adjacent_obs[:, :, 2:3] = historical_adjacent_obs[:, :,
+                                              2:3] * 360.0  # Normalize heading to [0, 1]. This is a mistake done when extracting the data
+        historical_adjacent_obs[:, :, 3:] = historical_adjacent_obs[:, :, 3:] * 10.0
 
-# Check data file exists
-index_file_path = Path(os.path.join(input_path, filename))
-if index_file_path.exists():
-    logger.info("Loading index map from {}", index_file_path)
-    data_dict = pickle.load(open(index_file_path, "rb"))
+        for t in range(num_timesteps):
+            draw_frame(backgrond_img, historical_adjacent_obs, historical_ego_obs, hidden_ogm_cells, target, mask, None, t,
+                       num_timesteps)
+            if t == num_timesteps - 1:
+                draw_frame(backgrond_img, historical_adjacent_obs, historical_ego_obs, hidden_ogm_cells, target, mask,
+                           loss, t, num_timesteps)
 
-    # Loading background images
-    for scene_id in scene_ids:
-        if int(scene_id) < start_scene or int(scene_id) > end_scene:
-            continue
-
-        # Store background images for scenes
-        bg_path = os.path.join(input_path, 'semantic_maps', f"{scene_id}_background.png")
-        img = cv2.imread(bg_path)
-        background_images[int(scene_id)] = img
-
-keys = list(data_dict.keys())
-print("Done Loading")
-
-for idx in range(len(keys)):
-    key = keys[idx]
-    keys = key.split("_")
-    scene_id = int(keys[0])
-    current_frame = int(keys[1])
-    ego_vehicle_track_idx = int(keys[2])
-
-    data_dict = data_dict[key]
-
-    # map
-    backgrond_img = background_images[scene_id]
-
-    # Historical observations
-    historical_adjacent_obs, historical_ego_obs = data_dict["historical_adjacent_obs"], data_dict["historical_ego_obs"]
-    hidden_ogm_cells = data_dict["hidden_ogm_cells"]
-
-    num_timesteps = 21
-
-    for t in range(num_timesteps):
-        draw_frame(backgrond_img, historical_adjacent_obs.values(), historical_ego_obs, hidden_ogm_cells, t,
-                   num_timesteps)
-
-    image_folder = 'frames'
-    video_name = 'vehicle_animation.mp4'
-    frame_rate = 5  # fps
-
-    frame_array = []
-    for t in range(num_timesteps):
-        filename = f"{image_folder}/frame_{t:03d}.png"
-        img = cv2.imread(filename)
-        height, width, _ = img.shape
-        frame_array.append(img)
-
-    out = cv2.VideoWriter(video_name, cv2.VideoWriter_fourcc(*'mp4v'), frame_rate, (width, height))
-
-    for frame in frame_array:
-        out.write(frame)
-    out.release()
+        # image_folder = 'frames'
+        # video_name = 'vehicle_animation.mp4'
+        # frame_rate = 5  # fps
+        #
+        #
+        # frame_array = []
+        # for t in range(num_timesteps):
+        #     filename = f"{image_folder}/frame_{t:03d}.png"
+        #     img = cv2.imread(filename)
+        #     height, width, _ = img.shape
+        #     frame_array.append(img)
+        #
+        # out = cv2.VideoWriter(video_name, cv2.VideoWriter_fourcc(*'mp4v'), frame_rate, (width, height))
+        #
+        # for frame in frame_array:
+        #     out.write(frame)
+        # out.release()
 
 
 def interactive_playback(image_folder, total_frames):
@@ -196,4 +174,4 @@ def interactive_playback(image_folder, total_frames):
 
 
 # Run interactive viewer
-interactive_playback("frames", num_timesteps)
+# interactive_playback("frames", num_timesteps)

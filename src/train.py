@@ -4,8 +4,7 @@ import torch
 import yaml
 
 from src.dataset.data_loader import OGMDataLoader
-from src.models.spatio_temporal_encoder import SGATTransformer
-from src.models.transformer.graph_weight_encoder import GraphWeightEncoder
+from src.models.transformer.spatial_temporal_encoder_decoder import CellsFromVehicles, CellFromVehicleAndMap
 import torch.nn as nn
 
 from src.utils.histogram import plot_histogram
@@ -52,15 +51,18 @@ def train(model, data_loader, config):
                     inputs[k] = v.to(config['model']["device"])
 
             mask = inputs['mask']  # Mask indicates the non-padded cells (1: valid, 0: padded)
-            seq_mask = inputs['seq_mask']  # Sequence mask for the historical observations
-            outputs = model(inputs, seq_mask).squeeze()
-            outputs_sig = nn.Sigmoid()(outputs)
-
-            # Calculate the binary cross-entropy loss
             # Masking is applied to ignore unwanted cells
             mask_fixed_blocks = (targets != 3).squeeze()  # Cells occupied with fixed blocks are marked with a 3 in the target
             mask = mask * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not padded
 
+            seq_mask = inputs['seq_mask']  # Sequence mask for the historical observations
+            cell_feat = inputs['hidden_ogm_cells']
+            veh_feat = inputs['historical_adjacent_obs']
+            map = inputs['map_obs']
+            outputs = model(veh_feat, cell_feat, seq_mask, mask, map).squeeze()
+            outputs_sig = nn.Sigmoid()(outputs)
+
+            # Calculate the binary cross-entropy loss
             targets = targets.squeeze() * mask
             outputs = outputs * mask  # Apply mask to outputs
             outputs_sig = outputs_sig * mask  # Apply mask to outputs
@@ -115,6 +117,7 @@ if __name__ == '__main__':
 
     train_dataloader = OGMDataLoader(config['data'], phase='train').create_dataloader()
 
-    model = SGATTransformer(config['model']).to(config['model']["device"])
+    model = CellFromVehicleAndMap()
+    model = model.to(config['model']["device"])
 
     train(model, train_dataloader, config)

@@ -1,17 +1,12 @@
 import cv2
 import numpy as np
-from pathlib import Path
-import re
-import os
-import math
+import time
 
-from loguru import logger
-import pickle
-
-import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
+
+from src.utils.exponential_backoff import retry_with_exponential_backoff
 
 
 def _rot2d(theta):
@@ -94,7 +89,7 @@ def draw_frame(map_img, adj_vehicle_data, ego_vehicle_data, cells, targets, mask
         fig.savefig(save_path, bbox_inches='tight', pad_inches=0)
         plt.close(fig)
     else:
-        plt.show()
+        retry_with_exponential_backoff(plt.show, max_attempts=5, initial_delay=1, factor=2, jitter=True)
 
     print("Frame drawn")
 
@@ -151,6 +146,7 @@ def convert_to_images(keys, data_dict, background_images, targets, masks, losses
         #     out.write(frame)
         # out.release()
 
+        time.sleep(60)
 
 def interactive_playback(image_folder, total_frames):
     fig, ax = plt.subplots()

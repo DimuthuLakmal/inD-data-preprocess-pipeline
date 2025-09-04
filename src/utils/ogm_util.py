@@ -130,7 +130,7 @@ def create_OGM_ego(ego_pts, ego_heading, visible_bbox, hidden_bbox, image, fixed
     # If not, then return None as the data is not useful
     has_hidden_vehicle = np.any(grid == 2)
     if not has_hidden_vehicle:
-        return None, None, None, None  # no hidden vehicles detected
+        return None, None, None, None, None  # no hidden vehicles detected
 
     # The following indices will be used to sample the cells later
     occupied_by_hidden_indices = np.where(grid == 2)
@@ -144,12 +144,17 @@ def create_OGM_ego(ego_pts, ego_heading, visible_bbox, hidden_bbox, image, fixed
                 return False
         return True
 
+    cell_coords = []
+    image_width_height = image.shape[:2]
     for r in range(GRID_ROWS):
         for c in range(GRID_COLS):
             cx, cy = cell_polygons[r][c].centroid.coords[0]
             if not is_visible((cx, cy), (driver_seat_loc[0], driver_seat_loc[1]), known_occupied_polygons):
                 if grid[r, c] == 0:  # only override if free. We don't mark cells occupied by hidden vehicles as hidden yet. Will do it later.
                     grid[r, c] = 0.5  # mark as occluded
+
+            cx, cy = cell_polygons[r][c].centroid.coords[0]
+            cell_coords.append(cell_polygons[r][c].exterior.coords[:])
 
 
     # Filter out irrelevant regions (e.g., black areas in the map)
@@ -182,7 +187,6 @@ def create_OGM_ego(ego_pts, ego_heading, visible_bbox, hidden_bbox, image, fixed
     # Store hidden cell centroids for extracting edge info in later steps
     hidden_cell_data = []
     hidden_cell_polygon_xys = []
-    image_width_height = image.shape[:2]
     for r, c in zip(selected_indices_raws, selected_indices_cols):
         cx, cy = cell_polygons[r][c].centroid.coords[0]
         hidden_cell_data.append(
@@ -191,10 +195,10 @@ def create_OGM_ego(ego_pts, ego_heading, visible_bbox, hidden_bbox, image, fixed
 
 
     # ---- VISUALIZATION ----
-    _visualise(image, visible_vehicle_polygons + hidden_vehicle_polygons, driver_seat_loc, cell_polygons, grid)
-    _visualise(image, visible_vehicle_polygons + hidden_vehicle_polygons, driver_seat_loc, cell_polygons, grid_gt)
+    # _visualise(image, visible_vehicle_polygons + hidden_vehicle_polygons, driver_seat_loc, cell_polygons, grid)
+    # _visualise(image, visible_vehicle_polygons + hidden_vehicle_polygons, driver_seat_loc, cell_polygons, grid_gt)
 
-    return grid, grid_gt, hidden_cell_data, hidden_cell_polygon_xys
+    return grid, grid_gt, hidden_cell_data, hidden_cell_polygon_xys, cell_coords
 
 
 def _filter_irrelevant_regions(cell_polygons, map_image):

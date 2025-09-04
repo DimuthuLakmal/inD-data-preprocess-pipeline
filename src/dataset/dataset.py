@@ -45,10 +45,11 @@ class OGMDataset(Dataset):
         self.background_images = {}
         self.fixed_blocks_info = {}
         self.frame_to_track_idxs = {}
+        self.class_dict = {'car': 0, 'truck_bus': 1, 'bicycle': 2, 'pedestrian': 3}
 
         start_scene = 0
         end_scene = 1
-        filename = "data.pkl"
+        filename = "index_map1.pkl"
 
         self.data_dict = {}
 
@@ -151,7 +152,7 @@ class OGMDataset(Dataset):
                 # We have to find out timesteps that have atleast one hidden record in the visiblity data.
                 # We cannot start from the minimum_frame as we have to include the history as well.
                 for i_frame in range(minimum_frame + self.history_length, maximum_frame,
-                                     (self.history_length * 2)):
+                                     (self.history_length+1)):
 
                     hidden_objects = visibility_data[(visibility_data['frame'] == i_frame) &
                                                      (visibility_data['visibility'] == False) &
@@ -211,14 +212,15 @@ class OGMDataset(Dataset):
                     hidden_tracks_pts = self._extract_ground_truth_data(ego_track, ego_track_meta, scene_id, i_frame)
 
                     # Create OGM
-                    ogm, ogm_gt, hidden_ogm_cells, hidden_cell_polygon_xys = create_OGM_ego(pts_ego.squeeze(),
-                                                                                            heading_ego,
-                                                                                            visible_tracks_pts,
-                                                                                            hidden_tracks_pts,
-                                                                                            self.background_images[
-                                                                                                scene_id],
-                                                                                            self.fixed_blocks_info[
-                                                                                                scene_id])
+                    ogm, ogm_gt, hidden_ogm_cells, hidden_cell_polygon_xys, cell_coords = create_OGM_ego(
+                        pts_ego.squeeze(),
+                        heading_ego,
+                        visible_tracks_pts,
+                        hidden_tracks_pts,
+                        self.background_images[
+                            scene_id],
+                        self.fixed_blocks_info[
+                            scene_id])
 
                     if ogm is None:
                         continue
@@ -242,7 +244,8 @@ class OGMDataset(Dataset):
                         "ogm": ogm,
                         "ogm_gt": ogm_gt,
                         "hidden_ogm_cells": hidden_ogm_cells,
-                        "hidden_cell_polygon_xys": hidden_cell_polygon_xys
+                        "hidden_cell_polygon_xys": hidden_cell_polygon_xys,
+                        "cell_coords": cell_coords
                     }
 
                     print(str(scene_id) + '_' + str(i_frame) + '_' + str(ego_vehicle_track_idx))
@@ -275,15 +278,15 @@ class OGMDataset(Dataset):
         # Historical observations
         historical_adjacent_obs, historical_ego_obs, map_obs, hidden_tracks_pts, visible_tracks_pts, edge_weights, \
             edge_index, ogm, ogm_gt, hidden_cell_polygon_xys = (data_dict["historical_adjacent_obs"],
-                                       data_dict["historical_ego_obs"],
-                                       data_dict["map_obs"],
-                                       data_dict["hidden_tracks_pts"],
-                                       data_dict["visible_tracks_pts"],
-                                       data_dict["edge_weights"],
-                                       data_dict["edge_index"],
-                                       data_dict["ogm"],
-                                       data_dict["ogm_gt"],
-                                       data_dict["hidden_cell_polygon_xys"])
+                                                                data_dict["historical_ego_obs"],
+                                                                data_dict["map_obs"],
+                                                                data_dict["hidden_tracks_pts"],
+                                                                data_dict["visible_tracks_pts"],
+                                                                data_dict["edge_weights"],
+                                                                data_dict["edge_index"],
+                                                                data_dict["ogm"],
+                                                                data_dict["ogm_gt"],
+                                                                data_dict["hidden_cell_polygon_xys"])
 
         # Create a black background image a size of background_img
         blank_img = np.zeros_like(backgrond_img[:, :, 0:1])  # Create a single channel image
@@ -309,7 +312,6 @@ class OGMDataset(Dataset):
         # # Extract the edge weights from the historical_adjacent_obs
         # edge_weights = np.expand_dims(historical_adjacent_obs[:, :, -1], axis=-1)
 
-
         historical_adjacent_obs = np.array(list(historical_adjacent_obs.values()), dtype=np.float32)
         historical_adjacent_no_e = historical_adjacent_obs[:, :, :-1]
 
@@ -323,7 +325,8 @@ class OGMDataset(Dataset):
         map_resized = map_resized / 255.0  # Normalize to [0, 1]
         hidden_cells_resized = hidden_cells_resized / 255.0  # Normalize to [0, 1]
 
-        historical_adjacent_no_e[:, :, 2:3] = historical_adjacent_no_e[:, :, 2:3] / 360.0  # Normalize heading to [0, 1]. This is a mistake done when extracting the data
+        historical_adjacent_no_e[:, :, 2:3] = historical_adjacent_no_e[:, :,
+                                              2:3] / 360.0  # Normalize heading to [0, 1]. This is a mistake done when extracting the data
         historical_adjacent_no_e[:, :, 3:] = historical_adjacent_no_e[:, :, 3:] / 10.0
         seq_mask = np.all(historical_adjacent_no_e == 0, axis=-1)  # Create a sequence mask where all features are zeros
 
@@ -428,7 +431,8 @@ class OGMDataset(Dataset):
                                                 ego_track_info["xVelocity"],
                                                 ego_track_info["yVelocity"],
                                                 ego_track_info["xAcceleration"],
-                                                ego_track_info["yAcceleration"]]))
+                                                ego_track_info["yAcceleration"],
+                                                self.class_dict[ego_track_meta["class"]]]))
 
             visible_track_ids = list(self.visibility_data[(self.visibility_data["trackId"] == ego_vehicle_track_idx)
                                                           & (self.visibility_data["frame"] == t)
@@ -454,7 +458,8 @@ class OGMDataset(Dataset):
 
                 track_data = np.array([track_info["center"][0], track_info["center"][1], track_info["heading"],
                                        track_info["xVelocity"], track_info["yVelocity"], track_info["xAcceleration"],
-                                       track_info["yAcceleration"], (history_t / self.history_length), distance_ego])
+                                       track_info["yAcceleration"], self.class_dict[track_meta["class"]],
+                                       (history_t / self.history_length), distance_ego])
 
                 last_recorded_t[track_idx] = history_t  # Store the last recorded time for the track
 
@@ -465,8 +470,8 @@ class OGMDataset(Dataset):
                 if track_idx not in historical_adjacent_obs.keys():
                     if t > starting_frame:
                         # This object appeared lately. So have to add nulls/empty/zeros for previous frames
-                        historical_adjacent_obs[track_idx] = [np.zeros(self.num_features + 1) for _ in
-                                                              range(starting_frame, t)]  # +1 for distance
+                        historical_adjacent_obs[track_idx] = [np.zeros(self.num_features + 2) for _ in
+                                                              range(starting_frame, t)]  # +1 for distance and class
                         historical_adjacent_obs[track_idx].append(track_data)
                     else:
                         historical_adjacent_obs[track_idx] = [track_data]
@@ -478,7 +483,7 @@ class OGMDataset(Dataset):
             # Fill the historical observations with zeros for the tracks that are not visible in the current frame
             for track_idx in historical_adjacent_obs.keys():
                 if track_idx not in recorded_tack_ids:
-                    historical_adjacent_obs[track_idx].append(np.zeros(self.num_features + 1))  # +1 for distance
+                    historical_adjacent_obs[track_idx].append(np.zeros(self.num_features + 2))  # +1 for distance and class
 
             # map_resized = cv2.resize(map, (224, 224), interpolation=cv2.INTER_AREA)
             # map_obs.append(map_resized)

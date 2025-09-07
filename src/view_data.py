@@ -61,10 +61,16 @@ def draw_cells(ax, x, y, heading, label, cell_size=20, as_center=True):
 
 
 def draw_circle(ax, vehicle, color, timestep, map_img=None):
-    x, y, heading, ax_, ay_ = vehicle[timestep][0], vehicle[timestep][1], vehicle[timestep][2], vehicle[timestep][
-            3], vehicle[timestep][4]
+    x, y, heading, vx_, vy_, vehicle_type = vehicle[timestep][0], vehicle[timestep][1], vehicle[timestep][2], vehicle[timestep][
+            3], vehicle[timestep][4], vehicle[timestep][7]
     x = x * map_img.shape[1]
     y = y * map_img.shape[0]
+
+    if vehicle_type == 2.0:  # Bycle
+        color='pink'
+    elif vehicle_type == 3.0:  # Pedestrian
+        color='purple'
+
     ax.add_patch(patches.Circle((x,y), 10, facecolor=color))
 
 def draw_poly(ax, poly_pts, color):
@@ -87,15 +93,19 @@ def overlay_clickable_polygons(ax, cell_coords, visibilities, labels, edge_unsel
     # draw patches with picking enabled
     drawn = []
     for i, (pts, visibility, label) in enumerate(zip(cell_coords, visibilities, labels)):
+        alpha=0.5
         if visibility == 1:
-            face = 'black'
+            face = 'yellow'
+            alpha=1
         elif visibility == 0:
             face = 'white'
         elif visibility == 0.7 or visibility == 0.5:
             face = 'gray'
         elif visibility == 3:
             face = 'green'
-        p = patches.Polygon(pts, closed=True, facecolor=face, picker=True, alpha=0.5, edgecolor=edge_unselected)
+        else:
+            face = 'orange'
+        p = patches.Polygon(pts, closed=True, facecolor=face, picker=True, alpha=alpha, edgecolor=edge_unselected)
         ax.add_patch(p)
         drawn.append(p)
 
@@ -251,9 +261,9 @@ def interactive_playback(frames, omg_cells, visibilities, labels, map_shape, on_
             pick_cid["id"] = fig.canvas.mpl_connect('pick_event', _on_pick)
 
     def on_key(event):
-        if event.key == 'right' or event.key == 'd':
+        if (event.key == 'right' or event.key == 'd') and frame_idx["i"] != len(frames) - 1:
             frame_idx["i"] = (frame_idx["i"] + 1) % len(frames)
-        elif event.key == 'left' or event.key == 'a':
+        elif (event.key == 'left' or event.key == 'a') and frame_idx["i"] != 0:
             frame_idx["i"] = (frame_idx["i"] - 1) % len(frames)
         im.set_data(frames[frame_idx["i"]])
         frame_text.set_text(f"Frame {(frame_idx['i'] + 1)}/{len(frames)}")
@@ -322,9 +332,9 @@ background_images = {}
 fixed_blocks_info = {}
 frame_to_track_idxs = {}
 
-start_scene = 0
-end_scene = 1
-filename = "index_map1.pkl"
+start_scene = 7
+end_scene = 8
+filename = "index_map3.pkl"
 
 data_dict_all = {}
 
@@ -354,11 +364,11 @@ for idx in range(len(keys)):
     current_frame = int(key_elements[1])
     ego_vehicle_track_idx = int(key_elements[2])
 
-    skip_until_scene_id = -1
+    skip_until_scene_id = 8
     if skip_until_scene_id != -1 and scene_id < skip_until_scene_id:
         continue
 
-    skip_until_frame = -1
+    skip_until_frame = 25452
     if skip_until_frame != -1 and current_frame < skip_until_frame:
         continue
 

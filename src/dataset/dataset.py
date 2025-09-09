@@ -85,6 +85,8 @@ class OGMDataset(Dataset):
 
                     label_dict[key] = normalised_data
 
+            self.label_dict = label_dict
+
             keys = list(label_dict.keys()) # These are the frame keys selected for training/testing
             for key in keys:
                 data_dict = self.data_dict[key]
@@ -101,6 +103,11 @@ class OGMDataset(Dataset):
                 # Extract distances for hidden ogm cells from adjacent tracks (This is a bi-partition graph)
                 edge_weights, edge_index = self._extract_edge_info(historical_adjacent_obs, cells,
                                                                    last_recorded_t)
+
+                data_dict["edge_weights"] = edge_weights
+                data_dict["edge_index"] = edge_index
+                data_dict["hidden_ogm_cells"] = np.array(cells, dtype=np.float32)
+                self.data_dict[key] = data_dict
 
         else:
             for scene_id in scene_ids:
@@ -285,11 +292,14 @@ class OGMDataset(Dataset):
 
             pickle.dump(self.data_dict, open(index_file_path, "wb"))
 
-        self.keys = list(self.data_dict.keys())
+        if self.label_dict is not None:
+            self.keys = list(self.label_dict.keys())
+        else:
+            self.keys = list(self.data_dict.keys())
         print("Done Loading")
 
     def __len__(self):
-        return len(self.data_dict)
+        return len(self.label_dict)
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):

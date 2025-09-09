@@ -47,9 +47,9 @@ class OGMDataset(Dataset):
         self.frame_to_track_idxs = {}
         self.class_dict = {'car': 0, 'truck_bus': 1, 'bicycle': 2, 'pedestrian': 3}
 
-        start_scene = 2
-        end_scene = 6
-        filename = "index_map2.pkl"
+        start_scene = 18
+        end_scene = 19
+        filename = "index_map5.pkl"
 
         self.data_dict = {}
 

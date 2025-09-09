@@ -216,7 +216,7 @@ class CellQueryEncoder(nn.Module):
 class CellFromVehicleAndMap(nn.Module):
     def __init__(self):
         super().__init__()
-        self.cells_from_vehicles = CellsFromVehicles(8, 2, 64)
+        self.cells_from_vehicles = CellsFromVehicles(9, 2, 64)
         self.image_encoder = ImageBackbone(out_dim=64)
         self.fusion = GatedFusion(64)
         self.query_encoder = CellQueryEncoder(d_model=64, d_pos=2)

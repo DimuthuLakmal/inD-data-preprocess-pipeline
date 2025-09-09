@@ -392,7 +392,6 @@ class OGMDataset(Dataset):
             "hidden_ogm_cells": hidden_ogm_cells[:, :-1],
             "hidden_cells_resized": hidden_cells_resized.astype(np.float32),
             "seq_mask": seq_mask,
-            "scene_id": scene_id,
         }
         target = hidden_ogm_cells[:, -1:].astype(np.float32)
 

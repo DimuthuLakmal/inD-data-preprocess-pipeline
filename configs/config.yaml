@@ -8,11 +8,11 @@ model:
   model_output_path: "../results/checkpoints/final.pt" # save trained model to this path
   load_saved_model: False # if you want pre-trained model weights to be loaded
   model_input_path: "output/model/pems08/epoch_58_model.pt" # pretrained model path
-  device: cuda # decides GPU or CPU for training
+  device: cpu # decides GPU or CPU for training
   graph_weight_encoder:
     dim_model: 64 # dimension that embedding layer maps the input of the model to.
     seq_len: 21 # input sequence length
-    input_dim: 8 # input dimension, inputs is traffic flow value, in some dataset it may be combined with time index
+    input_dim: 9 # input dimension, inputs is traffic flow value, in some dataset it may be combined with time index
     num_layers: 4 # # of temporal encoder layers
     num_heads: 8 # # of temporal encoder layers
     dropout_e_normal: 0.0 # dropout applied to the final output of temporal encoder layer of the first encoder
@@ -20,7 +20,7 @@ model:
   temporal_encoder:
     dim_model: 64 # dimension that embedding layer maps the input of the model to.
     seq_len: 21 # input sequence length
-    input_dim: 8 # input dimension, inputs is traffic flow value, in some dataset it may be combined with time index
+    input_dim: 9 # input dimension, inputs is traffic flow value, in some dataset it may be combined with time index
     num_layers: 4 # # of temporal encoder layers
     num_heads: 8 # # of temporal encoder layers
     dropout_e_normal: 0.0 # dropout applied to the final output of temporal encoder layer of the first encoder
@@ -46,6 +46,6 @@ data:
   dataset: "ind" # dataset name
   visualizer_params_dir: "../data/visualizer_params/"
   history_length: 20
-  num_features: 8 # number of features of the input data
+  num_features: 9 # number of features of the input data
   num_workers: 1 # number of workers for data loading
   label_dir: "../data/annotations/" # directory where the labels are stored

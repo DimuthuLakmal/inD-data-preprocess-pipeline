@@ -74,18 +74,32 @@ class OGMDataset(Dataset):
             label_dict = {}
             for file in annotation_files:
                 key = file.split('.')[0]
+                scene_id = int(key.split('_')[0])
                 with open(os.path.join(self.annotations_path, file), 'r') as f:
                     data = json.load(f)
-                    label_dict[key] = data
+                    normalised_data = []
+                    for cell in data:
+                        normalised_data.append([cell['cx'] / self.background_images[scene_id].shape[1],
+                                               cell['cy'] / self.background_images[scene_id].shape[0],
+                                               cell['label']])
+
+                    label_dict[key] = normalised_data
 
             keys = list(label_dict.keys()) # These are the frame keys selected for training/testing
             for key in keys:
                 data_dict = self.data_dict[key]
+                cells = label_dict[key]
 
                 historical_adjacent_obs, hidden_ogm_cells = (data_dict["historical_adjacent_obs"], data_dict["hidden_ogm_cells"])
+                last_recorded_t = {}
+                for i, (veh_index, obs) in enumerate(historical_adjacent_obs.items()):
+                    # Find the index of the last non-zero observation obs np array
+                    mask = np.any(np.array(obs) != 0, axis=1)
+                    last_t = np.where(mask)[0].max() if np.any(mask) else None
+                    last_recorded_t[veh_index] = last_t
 
                 # Extract distances for hidden ogm cells from adjacent tracks (This is a bi-partition graph)
-                edge_weights, edge_index = self._extract_edge_info(historical_adjacent_obs, hidden_ogm_cells,
+                edge_weights, edge_index = self._extract_edge_info(historical_adjacent_obs, cells,
                                                                    last_recorded_t)
 
         else:

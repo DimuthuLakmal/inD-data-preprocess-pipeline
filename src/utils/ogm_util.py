@@ -263,3 +263,26 @@ def _visualise(image, vehicle_polygons, driver_seat_loc, cell_polygons, grid):
     plt.title("Occupancy Grid Map")
     plt.legend()
     plt.show()
+
+
+def _rot2d(theta):
+    c, s = np.cos(theta), np.sin(theta)
+    return np.array([[c, -s],
+                     [s,  c]])
+
+def get_vert(x, y, heading, length=10.0, width=10.0):
+    """
+    Returns Nx2 array of polygon vertices for a rectangle centered at (x, y)
+    rotated by `heading` (radians). length/width are in the same units as x,y.
+    """
+    # rectangle corners in the vehicle's local frame (centered at origin)
+    L, W = length, width
+    local = np.array([
+        [+L / 2, +W / 2],
+        [+L / 2, -W / 2],
+        [-L / 2, -W / 2],
+        [-L / 2, +W / 2],
+    ])
+    a = np.deg2rad(heading)
+    R = _rot2d(a)
+    return (local @ R.T) + np.array([x, y])

@@ -6,7 +6,7 @@ import torch
 from torch.utils.data import Dataset
 from typing import Tuple
 
-from src.utils.ogm_util import create_OGM_ego
+from src.utils.ogm_util import create_OGM_ego, get_vert
 from src.utils.tracks_import import read_from_csv
 
 import json
@@ -78,19 +78,27 @@ class OGMDataset(Dataset):
                 with open(os.path.join(self.annotations_path, file), 'r') as f:
                     data = json.load(f)
                     normalised_data = []
+                    hidden_ogm_cells_xys = []
                     for cell in data:
                         normalised_data.append([cell['cx'] / self.background_images[scene_id].shape[1],
                                                cell['cy'] / self.background_images[scene_id].shape[0],
                                                cell['label']])
 
-                    label_dict[key] = normalised_data
+                        ego_vehicle_data = self.data_dict[key]["historical_ego_obs"][-1]
+                        hidden_ogm_cell_xy = get_vert(cell['cx'], cell['cy'], ego_vehicle_data[2], length=20.0, width=20.0)
+                        hidden_ogm_cells_xys.append(hidden_ogm_cell_xy)
+
+                    if len(normalised_data) == 0:  # No hidden cells selected
+                        continue
+
+                    label_dict[key] = (normalised_data, hidden_ogm_cells_xys)
 
             self.label_dict = label_dict
 
             keys = list(label_dict.keys()) # These are the frame keys selected for training/testing
             for key in keys:
                 data_dict = self.data_dict[key]
-                cells = label_dict[key]
+                ogm_cells, ogm_cells_xys = label_dict[key]
 
                 historical_adjacent_obs, hidden_ogm_cells = (data_dict["historical_adjacent_obs"], data_dict["hidden_ogm_cells"])
                 last_recorded_t = {}
@@ -101,12 +109,13 @@ class OGMDataset(Dataset):
                     last_recorded_t[veh_index] = last_t
 
                 # Extract distances for hidden ogm cells from adjacent tracks (This is a bi-partition graph)
-                edge_weights, edge_index = self._extract_edge_info(historical_adjacent_obs, cells,
+                edge_weights, edge_index = self._extract_edge_info(historical_adjacent_obs, ogm_cells,
                                                                    last_recorded_t)
 
                 data_dict["edge_weights"] = edge_weights
                 data_dict["edge_index"] = edge_index
-                data_dict["hidden_ogm_cells"] = np.array(cells, dtype=np.float32)
+                data_dict["hidden_ogm_cells"] = np.array(ogm_cells, dtype=np.float32)
+                data_dict["hidden_cell_polygon_xys"] = np.array(ogm_cells_xys, dtype=np.float32)
                 self.data_dict[key] = data_dict
 
         else:

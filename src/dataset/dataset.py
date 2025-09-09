@@ -38,6 +38,7 @@ class OGMDataset(Dataset):
         print(f"Found scenes: {scene_ids}")
 
         self.input_path = config['dataset_dir']
+        self.annotations_path = config['label_dir']
 
         self.tracks = []
         self.tracks_meta = []
@@ -47,7 +48,7 @@ class OGMDataset(Dataset):
         self.frame_to_track_idxs = {}
 
         start_scene = 0
-        end_scene = 27
+        end_scene = 19
         filename = "data.pkl"
 
         self.data_dict = {}
@@ -67,6 +68,15 @@ class OGMDataset(Dataset):
                 bg_path = os.path.join(self.input_path, 'semantic_maps', f"{scene_id}_background.png")
                 img = cv2.imread(bg_path)
                 self.background_images[int(scene_id)] = img
+
+            # load json files from annotations path
+            annotation_files = [f for f in os.listdir(self.annotations_path) if f.endswith('.json')]
+            label_dict = {}
+            for file in annotation_files:
+                key = file.split('.')[0]
+                with open(os.path.join(self.annotations_path, file), 'r') as f:
+                    data = json.load(f)
+                    label_dict[key] = data
 
         else:
             for scene_id in scene_ids:

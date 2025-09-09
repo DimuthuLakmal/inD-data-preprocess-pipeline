@@ -48,3 +48,4 @@ data:
   history_length: 20
   num_features: 8 # number of features of the input data
   num_workers: 1 # number of workers for data loading
+  label_dir: "../data/annotations/" # directory where the labels are stored

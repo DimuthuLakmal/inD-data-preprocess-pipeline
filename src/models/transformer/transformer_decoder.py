@@ -1,7 +1,7 @@
 from torch import nn
 
-from src.models.transformer.decoder_block import DecoderBlock
-from src.models.transformer.token_embedding import TokenEmbedding
+from models.transformer.decoder_block import DecoderBlock
+from models.transformer.token_embedding import TokenEmbedding
 
 
 class TransformerDecoder(nn.Module):

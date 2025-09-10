@@ -1,7 +1,7 @@
 from torch.utils.data import DataLoader
 
-from src.dataset.collate_fn import custom_collate
-from src.dataset.dataset import OGMDataset
+from dataset.collate_fn import custom_collate
+from dataset.dataset import OGMDataset
 
 
 class OGMDataLoader():

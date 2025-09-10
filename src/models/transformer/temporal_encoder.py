@@ -1,9 +1,9 @@
 import torch
 from torch import nn
 
-from src.models.transformer.atten_pooling import AttentionPool
-from src.models.transformer.encoder_block import EncoderBlock
-from src.models.transformer.positional_encoding import PositionalEncoder
+from models.transformer.atten_pooling import AttentionPool
+from models.transformer.encoder_block import EncoderBlock
+from models.transformer.positional_encoding import PositionalEncoder
 
 
 class TemporalEncoder(nn.Module):

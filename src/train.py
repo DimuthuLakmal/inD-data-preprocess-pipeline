@@ -3,12 +3,10 @@ import argparse
 import torch
 import yaml
 
-from src.dataset.data_loader import OGMDataLoader
-from src.models.spatio_temporal_encoder import SpatioTemporalEncoder
-from src.models.transformer.graph_weight_encoder import GraphWeightEncoder
+from dataset.data_loader import OGMDataLoader
+from models.spatio_temporal_encoder import SpatioTemporalEncoder
+from models.transformer.graph_weight_encoder import GraphWeightEncoder
 import torch.nn as nn
-
-from src.utils.histogram import plot_histogram
 
 
 def create_args():
@@ -109,7 +107,7 @@ def train(model, data_loader, config):
 
 
 if __name__ == '__main__':
-    with open("../configs/config.yaml", "r") as stream:
+    with open("configs/config.yaml", "r") as stream:
         config = yaml.safe_load(stream)
         config['data']['batch_size'] = config['model']['train_batch_size']
 

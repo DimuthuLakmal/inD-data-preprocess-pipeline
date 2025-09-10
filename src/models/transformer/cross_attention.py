@@ -1,6 +1,6 @@
 from torch import nn
 
-from src.models.transformer.multi_head_attention import MultiHeadAttention
+from models.transformer.multi_head_attention import MultiHeadAttention
 
 
 class CrossAttentionLayer(nn.Module):

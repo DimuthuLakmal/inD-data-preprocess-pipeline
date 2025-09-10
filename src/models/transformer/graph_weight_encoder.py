@@ -1,8 +1,8 @@
 import torch
 from torch import nn
 
-from src.models.transformer.encoder_block import EncoderBlock
-from src.models.transformer.positional_encoding import PositionalEncoder
+from models.transformer.encoder_block import EncoderBlock
+from models.transformer.positional_encoding import PositionalEncoder
 
 
 class GraphWeightEncoder(nn.Module):

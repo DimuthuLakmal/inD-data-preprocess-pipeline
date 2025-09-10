@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from torchvision.models.feature_extraction import create_feature_extractor
 
-from src.models.vision import base_models
+from models.vision import base_models
 
 
 class MapEncoder(nn.Module):

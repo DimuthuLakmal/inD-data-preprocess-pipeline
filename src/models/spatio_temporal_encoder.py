@@ -82,6 +82,68 @@ class TemporalEncoder(nn.Module):
         return self.ln(h)
 
 
+class CellQueryEmb(nn.Module):
+    """
+    Inputs
+      cell_xy_norm : [B, N2, 2]  (x,y ∈ [-1,1] in the SAME image/map space used by your frames)
+      cell_pad     : [B, N2] bool (True=pad)  optional
+
+    Output
+      Q_cell       : [B, N2, D]
+    """
+    def __init__(self, d_model=256, mode="fourier", n_freq=8, mlp_hidden=128, dropout=0.1):
+        super().__init__()
+        assert mode in {"mlp", "fourier"}
+        self.mode = mode
+        self.dropout = nn.Dropout(dropout)
+        self.ln = nn.LayerNorm(d_model)
+
+        if mode == "mlp":
+            in_dim = 2
+        else:
+            # Fourier features for x and y separately: for each dim -> [sin,cos] * n_freq
+            # total = 2 (raw x,y) + 4*n_freq
+            in_dim = 2 + 4 * n_freq
+            # register frequencies
+            freqs = math.pi * (2.0 ** torch.arange(n_freq).float())  # [n_freq]
+            self.register_buffer("freqs", freqs, persistent=False)
+
+        self.mode_mlp = nn.Sequential(
+            nn.Linear(in_dim, mlp_hidden),
+            nn.GELU(),
+            nn.Linear(mlp_hidden, d_model),
+        )
+
+        # Small init on the last layer helps keep logits stable early on
+        nn.init.trunc_normal_(self.mode_mlp[-1].weight, std=0.02)
+        nn.init.zeros_(self.mode_mlp[-1].bias)
+
+    def fourier_encode(self, xy):  # xy: [B,N2,2]
+        x, y = xy[..., 0:1], xy[..., 1:2]               # [B,N2,1]
+        # [B,N2,n_freq]
+        xw = x * self.freqs
+        yw = y * self.freqs
+        enc = torch.cat([
+            torch.sin(xw), torch.cos(xw),               # [B,N2,n_freq*2]
+            torch.sin(yw), torch.cos(yw)                # [B,N2,n_freq*2]
+        ], dim=-1)
+        return torch.cat([xy, enc], dim=-1)             # [B,N2, 2 + 4*n_freq]
+
+    def forward(self, cell_xy_norm, cell_pad=None):
+        if self.mode == "mlp":
+            feats = cell_xy_norm                        # [B,N2,2]
+        else:
+            feats = self.fourier_encode(cell_xy_norm)   # [B,N2, 2+4*n_freq]
+
+        q = self.mode_mlp(feats)                        # [B,N2,D]
+        q = self.ln(self.dropout(q))
+
+        if cell_pad is not None:
+            q = q.masked_fill(cell_pad.unsqueeze(-1), 0.0)
+        return q
+
+
+
 class CellDecoderCrossOnly(nn.Module):
     """
     Cells as queries; cross-attend to temporal sequence memory.
@@ -96,6 +158,9 @@ class CellDecoderCrossOnly(nn.Module):
     def __init__(self, d_model=256, nhead=4, layers=2, dropout=0.1):
         super().__init__()
         blocks = []
+
+        self.q_emb = CellQueryEmb(d_model=256, mode="mlp")
+
         for _ in range(layers):
             blocks += [nn.ModuleDict(dict(
                 ln1 = nn.LayerNorm(d_model),
@@ -110,7 +175,7 @@ class CellDecoderCrossOnly(nn.Module):
 
     def forward(self, Q_cell, H_enc, key_padding_mask, cell_pad=None):
         # True=pad for keys/values
-        h = Q_cell
+        h = self.q_emb(Q_cell, cell_pad)  # [B, N2, D]
         for b in self.blocks:
             q = b["ln1"](h)
             attn_out, _ = b["cross"](q, H_enc, H_enc, key_padding_mask=key_padding_mask)

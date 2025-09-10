@@ -174,6 +174,8 @@ class CellDecoderCrossOnly(nn.Module):
         self.head = nn.Linear(d_model, 1)
 
     def forward(self, Q_cell, H_enc, key_padding_mask, cell_pad=None):
+        cell_pad = ~cell_pad if cell_pad is not None else None
+
         # True=pad for keys/values
         h = self.q_emb(Q_cell, cell_pad)  # [B, N2, D]
         for b in self.blocks:
@@ -197,10 +199,10 @@ class MapSequenceEncoder(nn.Module):
         self.frame = FrameEncoder(d_model=d_model, pretrained=pretrained)
         self.temporal = TemporalEncoder(d_model=d_model, nhead=nhead, layers=enc_layers)
 
-    def forward(self, imgs, time_valid):
+    def forward(self, imgs, time_seq_pad):
         imgs = imgs.permute(0, 1, 4, 2, 3)  # [B, T, 3, H, W]
         seq_emb = self.frame(imgs)                 # [B, T, D]
-        H_enc  = self.temporal(seq_emb, time_valid)  # [B, T, D]
+        H_enc  = self.temporal(seq_emb, time_seq_pad)  # [B, T, D]
         return H_enc
 
 

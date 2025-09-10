@@ -53,7 +53,7 @@ def train(model, data_loader, config):
 
             mask = inputs['mask']  # Mask indicates the non-padded cells (1: valid, 0: padded)
             seq_mask = inputs['seq_mask']  # Sequence mask for the historical observations
-            outputs = model(inputs["maps_with_adjacent_vehicles"], inputs["hidden_ogm_cells"], seq_mask, mask).squeeze()
+            outputs = model(inputs["maps_with_adjacent_vehicles"], inputs["hidden_ogm_cells"], None, mask).squeeze()
             outputs_sig = nn.Sigmoid()(outputs)
 
             # Calculate the binary cross-entropy loss

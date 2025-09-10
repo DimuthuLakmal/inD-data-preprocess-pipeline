@@ -4,7 +4,7 @@ import torch
 import yaml
 
 from src.dataset.data_loader import OGMDataLoader
-from src.models.spatio_temporal_encoder import SGATTransformer
+from src.models.spatio_temporal_encoder import SpatioTemporalEncoder
 from src.models.transformer.graph_weight_encoder import GraphWeightEncoder
 import torch.nn as nn
 
@@ -53,7 +53,7 @@ def train(model, data_loader, config):
 
             mask = inputs['mask']  # Mask indicates the non-padded cells (1: valid, 0: padded)
             seq_mask = inputs['seq_mask']  # Sequence mask for the historical observations
-            outputs = model(inputs, seq_mask).squeeze()
+            outputs = model(inputs["maps_with_adjacent_vehicles"], inputs["hidden_ogm_cells"], seq_mask, mask).squeeze()
             outputs_sig = nn.Sigmoid()(outputs)
 
             # Calculate the binary cross-entropy loss
@@ -115,6 +115,6 @@ if __name__ == '__main__':
 
     train_dataloader = OGMDataLoader(config['data'], phase='train').create_dataloader()
 
-    model = SGATTransformer(config['model']).to(config['model']["device"])
+    model = SpatioTemporalEncoder()
 
     train(model, train_dataloader, config)

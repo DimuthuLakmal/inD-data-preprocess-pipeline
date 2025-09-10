@@ -1,90 +1,166 @@
 import torch
-from torch import nn
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision.models import resnet50
 
-from src.models.gat.gat_layer import GATLayer
-from src.models.transformer.cell_guided_cross_attention import CellGuidedCrossAttention
-from src.models.transformer.expert_gating import TwoExpertGatedFusion
-from src.models.transformer.graph_weight_encoder import GraphWeightEncoder
-from src.models.transformer.map_encoder_attn import MapEncoderAttention
-from src.models.transformer.temporal_encoder import TemporalEncoder
-from src.models.unet.unet import UNet, AttU_Net
-from src.models.vision.map_encoder import MapEncoder
+import math
+
+class FrameEncoder(nn.Module):
+    """
+    Map image -> per-frame embedding.
+    Input : imgs [B, T, 3, H, W]
+    Output: emb  [B, T, D]
+    """
+    def __init__(self, d_model=256, pretrained=True, global_pool='avg'):
+        super().__init__()
+        m = resnet50(weights="DEFAULT" if pretrained else None)
+
+        # Take ResNet trunk up to C5
+        self.backbone = nn.Sequential(
+            m.conv1, m.bn1, m.relu, m.maxpool,
+            m.layer1, m.layer2, m.layer3, m.layer4
+        )
+        c5 = 2048
+
+        # Project to d_model after global pooling
+        self.global_pool = global_pool
+        self.proj = nn.Linear(c5, d_model)
+
+    def forward(self, imgs):  # [B, T, 3, H, W]
+        B, T = imgs.shape[:2]
+        x = imgs.view(B*T, *imgs.shape[2:])         # [B*T, 3, H, W]
+        f = self.backbone(x)                        # [B*T, 2048, Hf, Wf]
+
+        if self.global_pool == 'avg':
+            f = F.adaptive_avg_pool2d(f, 1).squeeze(-1).squeeze(-1)   # [B*T, 2048]
+        elif self.global_pool == 'max':
+            f = F.adaptive_max_pool2d(f, 1).squeeze(-1).squeeze(-1)
+        else:
+            raise ValueError("global_pool must be 'avg' or 'max'")
+
+        emb = self.proj(f)                          # [B*T, D]
+        emb = emb.view(B, T, -1)                    # [B, T, D]
+        return emb
 
 
-class SGATTransformer(nn.Module):
-    def __init__(self, configs: dict):
-        super(SGATTransformer, self).__init__()
+class SinPE1D(nn.Module):
+    def __init__(self, d_model, max_len=4096):
+        super().__init__()
+        pe = torch.zeros(max_len, d_model)
+        pos = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(pos * div)
+        pe[:, 1::2] = torch.cos(pos * div)
+        self.register_buffer("pe", pe, persistent=False)
+    def forward(self, x):  # x: [B, T, D]
+        T = x.size(1)
+        return x + self.pe[:T].unsqueeze(0).to(x.dtype)
 
-        self.device = configs['device']
+class TemporalEncoder(nn.Module):
+    """
+    Inputs:
+      seq_emb    : [B, T, D]     (from FrameEncoder)
+      time_valid : [B, T] bool   (True=valid timestep, False=pad)
+    Output:
+      H_enc      : [B, T, D]     (sequence output, not pooled)
+    """
+    def __init__(self, d_model=256, nhead=4, layers=2, dropout=0.1):
+        super().__init__()
+        enc_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead,
+            dim_feedforward=4*d_model, dropout=dropout,
+            batch_first=True, norm_first=True
+        )
+        self.encoder = nn.TransformerEncoder(enc_layer, num_layers=layers)
+        self.pe = SinPE1D(d_model)
+        self.ln = nn.LayerNorm(d_model)
 
-        gwe_configs = configs['graph_weight_encoder']
-        gwe_configs['device'] = self.device
-        self.gw_encoder = GraphWeightEncoder(gwe_configs)
+    def forward(self, seq_emb, time_valid):
+        # PyTorch wants True=PAD → invert your True=valid
+        src_key_padding_mask = ~time_valid  # [B, T], True=pad
+        x = self.pe(seq_emb)                # [B, T, D]
+        h = self.encoder(x, src_key_padding_mask=src_key_padding_mask)  # [B, T, D]
+        return self.ln(h)
 
-        te_configs = configs['temporal_encoder']
-        te_configs['device'] = self.device
-        self.temporal_encoder = TemporalEncoder(te_configs)
 
-        gat_configs = configs['gat']
-        self.gat_layer = GATLayer(gat_configs)
-        self.fc_gat_out = nn.Linear(64, 1)
+class CellDecoderCrossOnly(nn.Module):
+    """
+    Cells as queries; cross-attend to temporal sequence memory.
+    Inputs:
+      Q_cell     : [B, N2, D]
+      H_enc      : [B, T, D]
+      time_valid : [B, T] bool  (True=valid)
+      cell_pad   : [B, N2] bool (True=pad)  optional
+    Output:
+      logits     : [B, N2, 1]
+    """
+    def __init__(self, d_model=256, nhead=4, layers=2, dropout=0.1):
+        super().__init__()
+        blocks = []
+        for _ in range(layers):
+            blocks += [nn.ModuleDict(dict(
+                ln1 = nn.LayerNorm(d_model),
+                cross = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True),
+                ln2 = nn.LayerNorm(d_model),
+                ffn = nn.Sequential(
+                    nn.Linear(d_model, 4*d_model), nn.GELU(), nn.Linear(4*d_model, d_model)
+                ),
+            ))]
+        self.blocks = nn.ModuleList(blocks)
+        self.head = nn.Linear(d_model, 1)
 
-        # unet_configs = configs['unet']
-        # self.unet = AttU_Net(config=unet_configs)
+    def forward(self, Q_cell, H_enc, time_valid, cell_pad=None):
+        key_padding_mask = ~time_valid  # [B, T], True=pad for keys/values
+        h = Q_cell
+        for b in self.blocks:
+            q = b["ln1"](h)
+            attn_out, _ = b["cross"](q, H_enc, H_enc, key_padding_mask=key_padding_mask)
+            h = h + attn_out
+            h = h + b["ffn"](b["ln2"](h))
+        if cell_pad is not None:
+            h = h.masked_fill(cell_pad.unsqueeze(-1), 0.0)
+        return self.head(h)  # [B, N2, 1]
 
-        # self.xattn = CellGuidedCrossAttention(unet_channels=unet_configs['output_ch'],
-        #                                       q_dim=gat_configs['dim_model'],
-        #                                       d_model=64,
-        #                                       n_heads=4,
-        #                                       out_dim=1,
-        #                                       add_xy_to_q=False,
-        #                                       xy_dim=2,
-        #                                       use_pos_enc=True)
 
-        self.expert_gating = TwoExpertGatedFusion(64)
+class MapSequenceEncoder(nn.Module):
+    """
+    Maps -> per-frame embeddings -> temporal sequence memory
+    Input : imgs [B, T, 3, H, W], time_valid [B, T] (True=valid)
+    Output: H_enc [B, T, D]
+    """
+    def __init__(self, d_model=256, nhead=4, enc_layers=2, pretrained=True):
+        super().__init__()
+        self.frame = FrameEncoder(d_model=d_model, pretrained=pretrained)
+        self.temporal = TemporalEncoder(d_model=d_model, nhead=nhead, layers=enc_layers)
 
-        self.map_encoder_atten = MapEncoderAttention(256, 32, d=64)
+    def forward(self, imgs, time_valid):
+        imgs = imgs.permute(0, 1, 4, 2, 3)  # [B, T, 3, H, W]
+        seq_emb = self.frame(imgs)                 # [B, T, D]
+        H_enc  = self.temporal(seq_emb, time_valid)  # [B, T, D]
+        return H_enc
 
-        self.map_encoder = MapEncoder(model_arch='resnet50', input_image_shape=(4, 224, 224), global_feature_dim=64)
-        self.map_encoder2 = MapEncoder(model_arch='resnet18', input_image_shape=(3, 224, 224), global_feature_dim=32)
 
-    def reset_parameters(self):
-        """Reset parameters of the model."""
-        nn.init.uniform_(self.fc_gat_out.weight, a=-1.0, b=1.0)
-        # TODO: since the classes are not balanced, the weights can be initialized as pos/total
+class SpatioTemporalEncoder(nn.Module):
+    """
+    Full model: maps -> per-frame embeddings -> temporal sequence memory -> per-cell decoding
+    Inputs:
+      imgs       : [B, T, 3, H, W]
+      time_valid : [B, T] bool   (True=valid timestep, False=pad)
+      Q_cell     : [B, N2, D]    (cell queries)
+      cell_pad   : [B, N2] bool  (True=pad) optional
+    Output:
+      logits     : [B, N2, 1]
+    """
+    def __init__(self, d_model=256, nhead=4, enc_layers=2, dec_layers=2,
+                 pretrained=True, dropout=0.1):
+        super().__init__()
+        self.encoder = MapSequenceEncoder(d_model=d_model, nhead=nhead,
+                                          enc_layers=enc_layers, pretrained=pretrained)
+        self.decoder = CellDecoderCrossOnly(d_model=d_model, nhead=nhead,
+                                            layers=dec_layers, dropout=dropout)
 
-    def forward(self, x, seq_mask=None):
-        x_gwe = self.gw_encoder(x, seq_mask)
-        x_te = self.temporal_encoder(x, None)
+    def forward(self, imgs, time_valid, Q_cell, cell_pad=None):
+        H_enc = self.encoder(imgs, time_valid)          # [B, T, D]
+        logits = self.decoder(Q_cell, H_enc, time_valid, cell_pad)  # [B, N2, 1]
+        return logits
 
-        # unet_out = self.unet(x)
-        map_inputs = x['map_obs'].permute(0, 3, 1, 2)
-        map_output = self.map_encoder2(map_inputs)[0]
-
-        gat_out = self.gat_layer(x_te, x_gwe, x, map_output)
-        gat_out_fc = self.fc_gat_out(gat_out)
-
-        # unet_out = self.unet(x)
-        # map_inputs = torch.concat([x['map_obs'], x["hidden_cells_resized"].unsqueeze(dim=-1)], dim=-1)
-        # map_inputs = map_inputs.permute(0, 3, 1, 2)
-        # map_output = self.map_encoder(map_inputs)[0]
-        #
-        # ### These are just testing lines, not concrete implementations
-        # map_output = map_output.unsqueeze(dim=1).repeat_interleave(gat_out.shape[1], dim=1)
-
-        # fused = self.expert_gating(map_output, gat_out)
-        # gat_out_fc = self.fc_gat_out(fused)
-
-        # combine map and GAT features
-        # combined = torch.cat([map_output, gat_out], dim=-1)
-        # gat_out_fc = self.fc_gat_out(map_output)
-        ## end testing lines
-
-        cell_xy = x['hidden_ogm_cells']
-        # fused_cells, attn_maps = self.xattn(map_output, gat_out, cell_xy=cell_xy,
-        #                                     query_mask=mask)  # fused_cells: (B,M,256)
-
-        # _, fused_cells = self.map_encoder_atten(map_output, gat_out)
-        # fused_cells_fc = self.fc_gat_out(fused_cells)
-
-        return gat_out_fc

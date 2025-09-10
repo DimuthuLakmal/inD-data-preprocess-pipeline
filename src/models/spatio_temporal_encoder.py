@@ -132,10 +132,10 @@ class MapSequenceEncoder(nn.Module):
         self.frame = FrameEncoder(d_model=d_model, pretrained=pretrained)
         self.temporal = TemporalEncoder(d_model=d_model, nhead=nhead, layers=enc_layers)
 
-    def forward(self, imgs, time_valid):
+    def forward(self, imgs, seq_time_mask):
         imgs = imgs.permute(0, 1, 4, 2, 3)  # [B, T, 3, H, W]
         seq_emb = self.frame(imgs)                 # [B, T, D]
-        H_enc  = self.temporal(seq_emb, time_valid)  # [B, T, D]
+        H_enc  = self.temporal(seq_emb, seq_time_mask)  # [B, T, D]
         return H_enc
 
 

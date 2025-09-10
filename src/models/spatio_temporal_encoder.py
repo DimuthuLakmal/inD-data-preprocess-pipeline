@@ -159,7 +159,7 @@ class CellDecoderCrossOnly(nn.Module):
         super().__init__()
         blocks = []
 
-        self.q_emb = CellQueryEmb(d_model=256, mode="mlp")
+        self.q_emb = CellQueryEmb(d_model=d_model, mode="mlp")
 
         for _ in range(layers):
             blocks += [nn.ModuleDict(dict(
@@ -174,6 +174,8 @@ class CellDecoderCrossOnly(nn.Module):
         self.head = nn.Linear(d_model, 1)
 
     def forward(self, Q_cell, H_enc, key_padding_mask, cell_pad=None):
+        cell_pad = ~cell_pad if cell_pad is not None else None
+
         # True=pad for keys/values
         h = self.q_emb(Q_cell, cell_pad)  # [B, N2, D]
         for b in self.blocks:

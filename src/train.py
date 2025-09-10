@@ -113,6 +113,6 @@ if __name__ == '__main__':
 
     train_dataloader = OGMDataLoader(config['data'], phase='train').create_dataloader()
 
-    model = SpatioTemporalEncoder()
+    model = SpatioTemporalEncoder(pretrained=False, d_model=64).to(config['model']['device'])
 
     train(model, train_dataloader, config)

@@ -1,6 +1,6 @@
 # Model Configs
 model:
-  lr: 0.0005 # learning rate
+  lr: 0.001 # learning rate
   use_lr_scheduler: True # if you want to use learning rate scheduler
   train_batch_size: 8
   test_batch_size: 16
@@ -8,7 +8,7 @@ model:
   model_output_path: "results/checkpoints/final.pt" # save trained model to this path
   load_saved_model: False # if you want pre-trained model weights to be loaded
   model_input_path: "output/model/pems08/epoch_58_model.pt" # pretrained model path
-  device: cpu # decides GPU or CPU for training
+  device: cuda # decides GPU or CPU for training
   graph_weight_encoder:
     dim_model: 64 # dimension that embedding layer maps the input of the model to.
     seq_len: 21 # input sequence length

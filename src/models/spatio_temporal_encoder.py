@@ -75,9 +75,8 @@ class TemporalEncoder(nn.Module):
         self.pe = SinPE1D(d_model)
         self.ln = nn.LayerNorm(d_model)
 
-    def forward(self, seq_emb, time_valid):
-        # PyTorch wants True=PAD → invert your True=valid
-        src_key_padding_mask = ~time_valid  # [B, T], True=pad
+    def forward(self, seq_emb, src_key_padding_mask):
+        # PyTorch wants True=PAD
         x = self.pe(seq_emb)                # [B, T, D]
         h = self.encoder(x, src_key_padding_mask=src_key_padding_mask)  # [B, T, D]
         return self.ln(h)
@@ -109,8 +108,8 @@ class CellDecoderCrossOnly(nn.Module):
         self.blocks = nn.ModuleList(blocks)
         self.head = nn.Linear(d_model, 1)
 
-    def forward(self, Q_cell, H_enc, time_valid, cell_pad=None):
-        key_padding_mask = ~time_valid  # [B, T], True=pad for keys/values
+    def forward(self, Q_cell, H_enc, key_padding_mask, cell_pad=None):
+        # True=pad for keys/values
         h = Q_cell
         for b in self.blocks:
             q = b["ln1"](h)

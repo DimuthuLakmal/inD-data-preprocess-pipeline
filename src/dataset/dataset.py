@@ -22,6 +22,8 @@ from loguru import logger
 import pandas as pd
 import pickle
 
+from src.utils.view_data import draw_circle
+
 
 class OGMDataset(Dataset):
     """Face Landmarks dataset."""
@@ -39,6 +41,8 @@ class OGMDataset(Dataset):
 
         self.input_path = config['dataset_dir']
         self.annotations_path = config['label_dir']
+
+        self.history_length = config["history_length"]
 
         self.tracks = []
         self.tracks_meta = []
@@ -345,29 +349,27 @@ class OGMDataset(Dataset):
         for cel in hidden_cell_polygon_xys:
             cv2.fillPoly(blank_img, [np.array(cel).astype(np.int32)], (255, 255, 255))
 
-        # Extract Ground Truth
-        # ego_track = self.tracks[(self.tracks["trackId"] == ego_vehicle_track_idx)
-        #                         & (self.tracks["recordingId"] == scene_id)].iloc[0].to_dict()
-        # ego_track_meta = self.tracks_meta[(self.tracks_meta["trackId"] == ego_vehicle_track_idx)
-        #                                   & (self.tracks_meta["recordingId"] == scene_id)].iloc[0].to_dict()
-        # pts_ego = self._extract_track_info(ego_track, ego_track_meta, current_frame, backgrond_img.shape)["pts"]
-        # heading_ego = self._get_heading(ego_track, ego_track_meta, current_frame)
-        #
-        # # Create OGM
-        # ogm, ogm_gt = create_OGM_ego(pts_ego.squeeze(), heading_ego, visible_tracks_pts, hidden_tracks_pts,
-        #                              gt_background_img, self.fixed_blocks_info[scene_id])
-        #
-        # # Remove distance feature from historical_adjacent_obs
-        # historical_adjacent_obs = np.array(list(historical_adjacent_obs.values()), dtype=np.float32)
-        # historical_adjacent_no_e = historical_adjacent_obs[:, :, :-1]
-        #
-        # # Extract the edge weights from the historical_adjacent_obs
-        # edge_weights = np.expand_dims(historical_adjacent_obs[:, :, -1], axis=-1)
-
         historical_adjacent_obs = np.array(list(historical_adjacent_obs.values()), dtype=np.float32)
         historical_adjacent_no_e = historical_adjacent_obs[:, :, :-1]
 
         hidden_ogm_cells = np.array(data_dict["hidden_ogm_cells"], dtype=np.float32)
+
+        # Convert x and y coordinates to the true scale
+        maps = []
+        historical_adjacent_no_e[:, :, 0] = historical_adjacent_no_e[:, :, 0] * backgrond_img.shape[1]
+        historical_adjacent_no_e[:, :, 1] = historical_adjacent_no_e[:, :, 1] * backgrond_img.shape[0]
+
+        # iterate through time axis
+        for i in range(self.history_length + 1):
+            # deepcopy background image
+            map = deepcopy(backgrond_img)
+            # Draw all adjacent tracks on the map
+            for track in historical_adjacent_no_e[:, i, :]:
+                map = draw_circle(track, (255, 255, 0), map)
+
+            maps.append(cv2.resize(map, (224, 224), interpolation=cv2.INTER_AREA))
+
+        maps_with_adjacent_vehicles = np.array(maps, dtype=np.float32)
 
         # Visual representation of the map
         map_resized = cv2.resize(self.background_images[scene_id], (224, 224), interpolation=cv2.INTER_AREA)
@@ -392,6 +394,7 @@ class OGMDataset(Dataset):
             "hidden_ogm_cells": hidden_ogm_cells[:, :-1],
             "hidden_cells_resized": hidden_cells_resized.astype(np.float32),
             "seq_mask": seq_mask,
+            "maps_with_adjacent_vehicles": maps_with_adjacent_vehicles,
         }
         target = hidden_ogm_cells[:, -1:].astype(np.float32)
 

@@ -60,6 +60,18 @@ def draw_poly(ax, vehicle, color, timestep, map_img=None):
                                      edgecolor=color, linewidth=0.8))
 
 
+def draw_circle(vehicle, color, map_img=None):
+    x, y, heading, vehicle_type = vehicle[0], vehicle[1], vehicle[2], vehicle[7]
+
+    if vehicle_type == 2.0:  # Bycle
+        color = (221, 160, 221)
+    elif vehicle_type == 3.0:  # Pedestrian
+        color = (128, 0, 128)
+
+    # cv polygon
+    return cv2.circle(map_img, (int(x), int(y)), 10, color, -1)
+
+
 def draw_frame(map_img, adj_vehicle_data, ego_vehicle_data, cells, targets, masks, losses, timestep, num_timesteps, save_path=None):
 
     fig, ax = plt.subplots(figsize=(10, 10))

@@ -143,49 +143,85 @@ class CellQueryEmb(nn.Module):
         return q
 
 
-
-class CellDecoderCrossOnly(nn.Module):
-    """
-    Cells as queries; cross-attend to temporal sequence memory.
-    Inputs:
-      Q_cell     : [B, N2, D]
-      H_enc      : [B, T, D]
-      time_valid : [B, T] bool  (True=valid)
-      cell_pad   : [B, N2] bool (True=pad)  optional
-    Output:
-      logits     : [B, N2, 1]
-    """
-    def __init__(self, d_model=256, nhead=4, layers=2, dropout=0.1):
+class CrossAttention(nn.Module):
+    def __init__(self, q_dim: int, kv_dim: int, nhead: int = 4, head_dim: int = 32, dropout: float = 0.1):
         super().__init__()
-        blocks = []
+        self.nhead   = nhead
+        self.head_dim= head_dim
+        self.d_attn  = nhead * head_dim
 
-        self.q_emb = CellQueryEmb(d_model=256, mode="mlp")
+        self.Wq = nn.Linear(q_dim,  self.d_attn, bias=False)
+        self.Wk = nn.Linear(kv_dim, self.d_attn, bias=False)
+        self.Wv = nn.Linear(kv_dim, self.d_attn, bias=False)
 
-        for _ in range(layers):
-            blocks += [nn.ModuleDict(dict(
-                ln1 = nn.LayerNorm(d_model),
-                cross = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True),
-                ln2 = nn.LayerNorm(d_model),
-                ffn = nn.Sequential(
-                    nn.Linear(d_model, 4*d_model), nn.GELU(), nn.Linear(4*d_model, d_model)
-                ),
-            ))]
-        self.blocks = nn.ModuleList(blocks)
-        self.head = nn.Linear(d_model, 1)
+        self.out = nn.Linear(self.d_attn, q_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.ln_q = nn.LayerNorm(q_dim)
+        self.ln_o = nn.LayerNorm(q_dim)
 
-    def forward(self, Q_cell, H_enc, key_padding_mask, cell_pad=None):
-        cell_pad = ~cell_pad if cell_pad is not None else None
+    def _reshape_heads(self, x):
+        # x: [B, L, d_attn] -> [B, nH, L, head_dim]
+        B, L, _ = x.shape
+        return x.view(B, L, self.nhead, self.head_dim).transpose(1, 2)
 
-        # True=pad for keys/values
-        h = self.q_emb(Q_cell, cell_pad)  # [B, N2, D]
-        for b in self.blocks:
-            q = b["ln1"](h)
-            attn_out, _ = b["cross"](q, H_enc, H_enc, key_padding_mask=key_padding_mask)
-            h = h + attn_out
-            h = h + b["ffn"](b["ln2"](h))
+    def forward(self, Q, KV, key_padding_mask=None):
+        """
+        Q : [B, N2, q_dim]
+        KV: [B, T,  kv_dim]
+        key_padding_mask: [B, T] bool (True=pad)
+        """
+        B, N2, _ = Q.shape
+        _,  T, _ = KV.shape
+
+        q = self.ln_q(Q)
+        qh = self._reshape_heads(self.Wq(q))        # [B, nH, N2, Hd]
+        kh = self._reshape_heads(self.Wk(KV))       # [B, nH,  T, Hd]
+        vh = self._reshape_heads(self.Wv(KV))       # [B, nH,  T, Hd]
+
+        # scaled dot-product attention
+        scores = torch.matmul(qh, kh.transpose(-2, -1)) / (self.head_dim ** 0.5)  # [B,nH,N2,T]
+        if key_padding_mask is not None:
+            scores = scores.masked_fill(key_padding_mask[:, None, None, :], float('-inf'))
+        attn = F.softmax(scores, dim=-1)
+        attn = self.dropout(attn)
+
+        ctx = torch.matmul(attn, vh)                # [B,nH,N2,Hd]
+        ctx = ctx.transpose(1, 2).contiguous().view(B, N2, self.d_attn)  # [B,N2,d_attn]
+        out = self.out(ctx)                          # [B,N2,q_dim]
+        out = self.ln_o(Q + out)                     # residual + norm
+        return out
+
+
+class CellDecoderBlock(nn.Module):
+    def __init__(self, q_dim: int, kv_dim: int, nhead=4, head_dim=32, dropout=0.1):
+        super().__init__()
+        self.cross = CrossAttention(q_dim, kv_dim, nhead=nhead, head_dim=head_dim, dropout=dropout)
+        self.ffn = nn.Sequential(
+            nn.LayerNorm(q_dim),
+            nn.Linear(q_dim, 4*q_dim), nn.GELU(), nn.Linear(4*q_dim, q_dim)
+        )
+
+    def forward(self, Q_cell, H_enc, key_padding_mask=None):
+        h = self.cross(Q_cell, H_enc, key_padding_mask)
+        h = h + self.ffn(h)
+        return h  # [B,N2,q_dim]
+
+
+class CellDecoder(nn.Module):
+    def __init__(self, q_dim: int, kv_dim: int, n_layers=2, nhead=4, head_dim=32, dropout=0.1):
+        super().__init__()
+        self.blocks = nn.ModuleList([
+            CellDecoderBlock(q_dim, kv_dim, nhead, head_dim, dropout) for _ in range(n_layers)
+        ])
+        self.head = nn.Linear(q_dim, 1)
+
+    def forward(self, Q_cell, H_enc, key_padding_mask=None, cell_pad=None):
+        h = Q_cell
+        for blk in self.blocks:
+            h = blk(h, H_enc, key_padding_mask)
         if cell_pad is not None:
             h = h.masked_fill(cell_pad.unsqueeze(-1), 0.0)
-        return self.head(h)  # [B, N2, 1]
+        return self.head(h)  # [B,N2,1]
 
 
 class MapSequenceEncoder(nn.Module):
@@ -222,8 +258,7 @@ class SpatioTemporalEncoder(nn.Module):
         super().__init__()
         self.encoder = MapSequenceEncoder(d_model=d_model, nhead=nhead,
                                           enc_layers=enc_layers, pretrained=pretrained)
-        self.decoder = CellDecoderCrossOnly(d_model=d_model, nhead=nhead,
-                                            layers=dec_layers, dropout=dropout)
+        self.decoder = CellDecoder(q_dim=32, kv_dim=d_model, n_layers=dec_layers, nhead=nhead, head_dim=32, dropout=0.1)
 
     def forward(self, imgs, Q_cell, time_seq_pad, cell_pad=None):
         H_enc = self.encoder(imgs, time_seq_pad)          # [B, T, D]

@@ -367,6 +367,8 @@ class OGMDataset(Dataset):
             for track in historical_adjacent_no_e[:, i, :]:
                 map = draw_circle(track, (255, 255, 0), map)
 
+            cv2.imwrite(f"test_{i}.png", map)
+
             maps.append(cv2.resize(map, (224, 224), interpolation=cv2.INTER_AREA))
 
         maps_with_adjacent_vehicles = np.array(maps, dtype=np.float32)

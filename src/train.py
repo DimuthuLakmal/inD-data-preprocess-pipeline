@@ -43,7 +43,7 @@ def train(model, data_loader, config):
     first_batch = True
 
     for epoch in range(config['model']['train_epochs']):  # Example: 10 epochs
-        for batch_idx, (inputs, target, keys, imgs) in enumerate(data_loader):
+        for batch_idx, (inputs, target) in enumerate(data_loader):
 
             # Move data to the correct device
             targets = target.to(config['model']["device"])

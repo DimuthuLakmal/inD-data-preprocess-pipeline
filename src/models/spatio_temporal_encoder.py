@@ -159,8 +159,8 @@ class SpatioTemporalEncoder(nn.Module):
         self.decoder = CellDecoderCrossOnly(d_model=d_model, nhead=nhead,
                                             layers=dec_layers, dropout=dropout)
 
-    def forward(self, imgs, time_valid, Q_cell, cell_pad=None):
-        H_enc = self.encoder(imgs, time_valid)          # [B, T, D]
-        logits = self.decoder(Q_cell, H_enc, time_valid, cell_pad)  # [B, N2, 1]
+    def forward(self, imgs, Q_cell, time_seq_pad, cell_pad=None):
+        H_enc = self.encoder(imgs, time_seq_pad)          # [B, T, D]
+        logits = self.decoder(Q_cell, H_enc, time_seq_pad, cell_pad)  # [B, N2, 1]
         return logits
 

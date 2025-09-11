@@ -225,7 +225,7 @@ class CellDecoder(nn.Module):
             h = blk(h, H_enc, key_padding_mask)
         if cell_pad is not None:
             h = h.masked_fill(cell_pad.unsqueeze(-1), 0.0)
-        return self.head(h)  # [B,N2,1]
+        return h # [B,N2,1]
 
 
 class CellsFromVehicles(nn.Module):
@@ -305,14 +305,14 @@ class CellFromVehicleAndMap(nn.Module):
                                          vehicle_pad_mask=vehicle_maks,
                                          tgt_pad_mask=~cell_mask)  # [B,N2,1]
 
-        # h_img = self.image_encoder(map.permute(0, 3, 1, 2))  # [B, D, Hf, Wf]
-        # h_img = self.sample_cells_from_feat(h_img, cell_feats)  # [B, N2, D]
-        # Q_cell = self.query_encoder(cell_feats, cell_valid=cell_mask)  # [B,N2,D]
-        #
-        # H_fused, gates = self.fusion(Q_cell, h_veh, h_img)
-        # logits = self.head(H_fused)  # [B,N2,1]
+        h_img = self.image_encoder(map.permute(0, 3, 1, 2))  # [B, D, Hf, Wf]
+        h_img = self.sample_cells_from_feat(h_img, cell_feats)  # [B, N2, D]
+        Q_cell = self.query_encoder(cell_feats, cell_valid=cell_mask)  # [B,N2,D]
 
-        return h_veh
+        H_fused, gates = self.fusion(Q_cell, h_veh, h_img)
+        logits = self.head(H_fused)  # [B,N2,1]
+
+        return logits
 
     def sample_cells_from_feat(self, feat_map, cell_xy_norm):
         """

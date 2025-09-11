@@ -75,8 +75,8 @@ class OGMDataset(Dataset):
             for file in annotation_files:
                 key = file.split('.')[0]
                 scene_id = int(key.split('_')[0])
-                if not(scene_id == 18 or scene_id == 19):
-                    continue
+                # if not(scene_id == 18 or scene_id == 19):
+                #     continue
 
                 with open(os.path.join(self.annotations_path, file), 'r') as f:
                     data = json.load(f)
@@ -346,15 +346,16 @@ class OGMDataset(Dataset):
                                                                 data_dict["ogm_gt"],
                                                                 data_dict["hidden_cell_polygon_xys"])
 
+        hidden_ogm_cells = np.array(data_dict["hidden_ogm_cells"], dtype=np.float32)
+        random_ogm_cell_index = random.randint(0, hidden_ogm_cells.shape[0] - 1)
+        hidden_ogm_cell = np.expand_dims(hidden_ogm_cells[random_ogm_cell_index], axis=0)
+
         # Create a black background image a size of background_img
         blank_img = np.zeros_like(backgrond_img[:, :, 0:1])  # Create a single channel image
-        for cel in hidden_cell_polygon_xys:
-            cv2.fillPoly(blank_img, [np.array(cel).astype(np.int32)], (255, 255, 255))
+        cv2.fillPoly(blank_img, [np.array(hidden_cell_polygon_xys[random_ogm_cell_index]).astype(np.int32)], (255, 255, 255))
 
         historical_adjacent_obs = np.array(list(historical_adjacent_obs.values()), dtype=np.float32)
         historical_adjacent_no_e = historical_adjacent_obs[:, :, :-1]
-
-        hidden_ogm_cells = np.array(data_dict["hidden_ogm_cells"], dtype=np.float32)
 
         # Visual representation of the map
         map_resized = cv2.resize(self.background_images[scene_id], (224, 224), interpolation=cv2.INTER_AREA)
@@ -376,11 +377,11 @@ class OGMDataset(Dataset):
             "ogm": ogm.astype(np.float32),
             "edge_weights": np.expand_dims(numpy.array(edge_weights, dtype=np.float32), axis=-1),
             "edge_index": numpy.array(edge_index, dtype=np.int64),
-            "hidden_ogm_cells": hidden_ogm_cells[:, :-1],
+            "hidden_ogm_cells": hidden_ogm_cell[:, :-1],
             "hidden_cells_resized": hidden_cells_resized.astype(np.float32),
             "seq_mask": seq_mask,
         }
-        target = hidden_ogm_cells[:, -1:].astype(np.float32)
+        target = hidden_ogm_cell[:, -1:].astype(np.float32)
 
         return input, target
 

@@ -52,7 +52,7 @@ def train(model, data_loader, config):
 
             mask = inputs['mask']  # Mask indicates the non-padded cells (1: valid, 0: padded)
             # Masking is applied to ignore unwanted cells
-            mask_fixed_blocks = (targets != 3).squeeze()  # Cells occupied with fixed blocks are marked with a 3 in the target
+            mask_fixed_blocks = (targets != 3).squeeze(-1)  # Cells occupied with fixed blocks are marked with a 3 in the target
             mask = mask * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not padded
 
             seq_mask = inputs['seq_mask']  # Sequence mask for the historical observations
@@ -60,11 +60,11 @@ def train(model, data_loader, config):
             cell_feat = inputs['hidden_ogm_cells']
             veh_feat = inputs['historical_adjacent_obs']
             map = inputs['map_obs']
-            outputs = model(veh_feat, cell_feat, seq_mask, mask, vehicle_mask, map).squeeze()
+            outputs = model(veh_feat, cell_feat, seq_mask, mask, vehicle_mask, map).squeeze(-1)
             outputs_sig = nn.Sigmoid()(outputs)
 
             # Calculate the binary cross-entropy loss
-            targets = targets.squeeze() * mask
+            targets = targets.squeeze(-1) * mask
             outputs = outputs * mask  # Apply mask to outputs
             outputs_sig = outputs_sig * mask  # Apply mask to outputs
 

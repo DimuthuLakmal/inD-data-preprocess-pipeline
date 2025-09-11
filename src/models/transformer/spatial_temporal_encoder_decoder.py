@@ -7,7 +7,6 @@ import torch.nn.functional as F
 from src.models.transformer.gated_fusion import GatedFusion
 from src.models.vision.base_models import ImageBackbone
 
-
 # --- Small helpers ---
 class FFN(nn.Module):
     def __init__(self, d_model, d_ff=4):
@@ -21,39 +20,68 @@ class FFN(nn.Module):
     def forward(self, x): return self.net(x)
 
 
-class CrossAttnBlock(nn.Module):
-    """One decoder block WITHOUT self-attention: only cross-attn + FFN."""
-
-    def __init__(self, d_model, nhead, dropout=0.1):
+class CrossAttention(nn.Module):
+    def __init__(self, q_dim: int, kv_dim: int, nhead: int = 4, head_dim: int = 32, dropout: float = 0.1):
         super().__init__()
-        self.cross = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
-        self.ln1 = nn.LayerNorm(d_model)
-        self.ffn = FFN(d_model)
-        self.ln2 = nn.LayerNorm(d_model)
+        self.nhead   = nhead
+        self.head_dim= head_dim
+        self.d_attn  = nhead * head_dim
 
-    def forward(self, q_tokens, kv_tokens, src_key_padding_mask=None, tgt_key_padding_mask=None, attn_bias=None):
+        self.Wq = nn.Linear(q_dim,  self.d_attn, bias=False)
+        self.Wk = nn.Linear(kv_dim, self.d_attn, bias=False)
+        self.Wv = nn.Linear(kv_dim, self.d_attn, bias=False)
+
+        self.out = nn.Linear(self.d_attn, q_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.ln_q = nn.LayerNorm(q_dim)
+        self.ln_o = nn.LayerNorm(q_dim)
+
+    def _reshape_heads(self, x):
+        # x: [B, L, d_attn] -> [B, nH, L, head_dim]
+        B, L, _ = x.shape
+        return x.view(B, L, self.nhead, self.head_dim).transpose(1, 2)
+
+    def forward(self, Q, KV, key_padding_mask=None):
         """
-        q_tokens: [B, N2, D]  (cells)
-        kv_tokens:[B, N1, D]  (vehicles)
-        src_key_padding_mask: [B, N1]  True = pad in encoder
-        tgt_key_padding_mask: [B, N2]  True = pad in decoder (optional)
-        attn_bias: optional additive bias for attention logits, shape [B, N2, N1]
+        Q : [B, N2, q_dim]
+        KV: [B, T,  kv_dim]
+        key_padding_mask: [B, T] bool (True=pad)
         """
-        q = self.ln1(q_tokens)
+        B, N2, _ = Q.shape
+        _,  T, _ = KV.shape
 
-        # MultiheadAttention supports attn_mask of shape [N2, N1] or [B*nH, N2, N1].
-        # For per-batch bias, we can fold it per-head via custom modules; here we skip attn_bias for simplicity.
-        x, _ = self.cross(q, kv_tokens, kv_tokens,
-                          key_padding_mask=src_key_padding_mask)  # no tgt_key_padding_mask arg in cross-attn
-        x = x + q_tokens  # residual
+        q = self.ln_q(Q)
+        qh = self._reshape_heads(self.Wq(q))        # [B, nH, N2, Hd]
+        kh = self._reshape_heads(self.Wk(KV))       # [B, nH,  T, Hd]
+        vh = self._reshape_heads(self.Wv(KV))       # [B, nH,  T, Hd]
 
-        y = self.ffn(self.ln2(x))
-        y = y + x  # residual
+        # scaled dot-product attention
+        scores = torch.matmul(qh, kh.transpose(-2, -1)) / (self.head_dim ** 0.5)  # [B,nH,N2,T]
+        if key_padding_mask is not None:
+            scores = scores.masked_fill(key_padding_mask[:, None, None, :], float('-inf'))
+        attn = F.softmax(scores, dim=-1)
+        attn = self.dropout(attn)
 
-        # Optionally zero out padded target positions (keep gradients off them downstream)
-        if tgt_key_padding_mask is not None:
-            y = y.masked_fill(~tgt_key_padding_mask.unsqueeze(-1), 0.0)
-        return y
+        ctx = torch.matmul(attn, vh)                # [B,nH,N2,Hd]
+        ctx = ctx.transpose(1, 2).contiguous().view(B, N2, self.d_attn)  # [B,N2,d_attn]
+        out = self.out(ctx)                          # [B,N2,q_dim]
+        out = self.ln_o(Q + out)                     # residual + norm
+        return out
+
+
+class CellDecoderBlock(nn.Module):
+    def __init__(self, q_dim: int, kv_dim: int, nhead=4, head_dim=32, dropout=0.1):
+        super().__init__()
+        self.cross = CrossAttention(q_dim, kv_dim, nhead=nhead, head_dim=head_dim, dropout=dropout)
+        self.ffn = nn.Sequential(
+            nn.LayerNorm(q_dim),
+            nn.Linear(q_dim, 4*q_dim), nn.GELU(), nn.Linear(4*q_dim, q_dim)
+        )
+
+    def forward(self, Q_cell, H_enc, key_padding_mask=None):
+        h = self.cross(Q_cell, H_enc, key_padding_mask)
+        h = h + self.ffn(h)
+        return h  # [B,N2,q_dim]
 
 
 # --- Sinusoidal 1D positional encoding (time) ---
@@ -102,18 +130,18 @@ class VehicleTemporalEncoder(nn.Module):
 
         self.ln_out = nn.LayerNorm(d_model)
 
-    def forward(self, x, time_valid, veh_valid=None):
+    def forward(self, x, time_maks, veh_maks=None):
         """
         x: [B, N1, T, d_in]
         time_valid: [B, N1, T]  (True=pad, False=keep). Required.
         veh_valid:  [B, N1]     (True=keep). Optional; if given, will zero invalid outputs.
         """
         B, N1, T, d_in = x.shape
-        assert time_valid.shape == (B, N1, T), "time_valid must be [B,N1,T] bool"
+        assert time_maks.shape == (B, N1, T), "time_valid must be [B,N1,T] bool"
 
         # Flatten vehicles into batch axis for per-vehicle temporal encoding
         x = self.proj_in(x).view(B * N1, T, -1)  # [B*N1, T, D]
-        pad_t = time_valid.view(B * N1, T)  # True = pad (Transformer convention)
+        pad_t = time_maks.view(B * N1, T)  # True = pad (Transformer convention)
 
         # Prepend CLS (not padded)
         cls = self.cls_token.expand(B * N1, 1, -1)  # [B*N1, 1, D]
@@ -133,39 +161,82 @@ class VehicleTemporalEncoder(nn.Module):
         h_cls = h[:, 0, :]  # [B*N1, D]
         h_veh = self.ln_out(h_cls).view(B, N1, -1)  # [B, N1, D]
 
-        # Optionally zero out invalid vehicle slots
-        if veh_valid is not None:
-            h_veh = h_veh * veh_valid.unsqueeze(-1).to(h_veh.dtype)
+        if veh_maks is not None:
+            assert veh_maks.shape == (B, N1)
+            h_veh = h_veh * ~veh_maks.unsqueeze(-1)
 
         return h_veh
 
 
-class CellDecoder(nn.Module):
-    def __init__(self, d_in, d_model, n_layers=2, nhead=4, dropout=0.1):
-        super().__init__()
-        self.proj = nn.Linear(d_in, d_model)
-        self.layers = nn.ModuleList([CrossAttnBlock(d_model, nhead, dropout) for _ in range(n_layers)])
-        # self.head = nn.Linear(d_model, 1)
+class CellQueryEmb(nn.Module):
+    """
+    Inputs
+      cell_xy_norm : [B, N2, 2]  (x,y ∈ [-1,1] in the SAME image/map space used by your frames)
+      cell_pad     : [B, N2] bool (True=pad)  optional
 
-    def forward(self, cell_feats, enc_feats, src_key_padding_mask=None, tgt_key_padding_mask=None):
-        # cell_feats: [B, N2, d_in] (could be learned queries or embedded (x,y))
-        h = self.proj(cell_feats)
-        for layer in self.layers:
-            h = layer(h, enc_feats, src_key_padding_mask=src_key_padding_mask,
-                      tgt_key_padding_mask=tgt_key_padding_mask)
-        # logits = self.head(h)  # [B, N2, 1]
-        return h
+    Output
+      Q_cell       : [B, N2, D]
+    """
+    def __init__(self, d_model=256, mode="fourier", n_freq=8, mlp_hidden=128, dropout=0.1):
+        super().__init__()
+        assert mode in {"mlp", "fourier"}
+        self.mode = mode
+        self.dropout = nn.Dropout(dropout)
+        self.ln = nn.LayerNorm(d_model)
+
+        in_dim = 2
+
+        self.mode_mlp = nn.Sequential(
+            nn.Linear(in_dim, mlp_hidden),
+            nn.GELU(),
+            nn.Linear(mlp_hidden, d_model),
+        )
+
+        # Small init on the last layer helps keep logits stable early on
+        nn.init.trunc_normal_(self.mode_mlp[-1].weight, std=0.02)
+        nn.init.zeros_(self.mode_mlp[-1].bias)
+
+    def forward(self, cell_xy_norm, cell_pad=None):
+        feats = cell_xy_norm                        # [B,N2,2]
+
+        q = self.mode_mlp(feats)                        # [B,N2,D]
+        q = self.ln(self.dropout(q))
+
+        if cell_pad is not None:
+            q = q.masked_fill(cell_pad.unsqueeze(-1), 0.0)
+        return q
+
+
+class CellDecoder(nn.Module):
+    def __init__(self, q_dim: int, kv_dim: int, n_layers=2, nhead=4, head_dim=32, dropout=0.1):
+        super().__init__()
+
+        self.q_emb = CellQueryEmb(d_model=q_dim, mode="mlp")
+
+        self.blocks = nn.ModuleList([
+            CellDecoderBlock(q_dim, kv_dim, nhead, head_dim, dropout) for _ in range(n_layers)
+        ])
+        self.head = nn.Linear(q_dim, 1)
+
+    def forward(self, Q_cell, H_enc, key_padding_mask=None, cell_pad=None):
+        h = Q_cell
+        h = self.q_emb(h, cell_pad)
+        for blk in self.blocks:
+            h = blk(h, H_enc, key_padding_mask)
+        if cell_pad is not None:
+            h = h.masked_fill(cell_pad.unsqueeze(-1), 0.0)
+        return self.head(h)  # [B,N2,1]
 
 
 class CellsFromVehicles(nn.Module):
-    def __init__(self, d_vehicle_in, d_cell_in, d_model=128, nhead=4, Lenc=2, Ldec=2):
+    def __init__(self, d_vehicle_in, q_dim, d_model=128, nhead=4, Lenc=2, Ldec=2):
         super().__init__()
-        self.enc = VehicleTemporalEncoder(d_vehicle_in, d_model, nhead=4, num_layers=2, dropout=0.1)
-        self.dec = CellDecoder(d_cell_in, d_model, n_layers=Ldec, nhead=nhead)
+        self.enc = VehicleTemporalEncoder(d_vehicle_in, d_model, nhead=nhead, num_layers=Lenc, dropout=0.1)
+        self.dec = CellDecoder(q_dim, d_model, n_layers=Ldec, nhead=nhead, head_dim=16, dropout=0.1)
 
-    def forward(self, veh_feats, cell_feats, src_pad_mask=None, tgt_pad_mask=None):
-        enc = self.enc(veh_feats, src_pad_mask)  # [B,N1,D]
-        logits = self.dec(cell_feats, enc, tgt_key_padding_mask=tgt_pad_mask)  # [B,N2,1]
+    def forward(self, veh_feats, cell_feats, seq_pad_mask=None, vehicle_pad_mask=None, tgt_pad_mask=None):
+        enc = self.enc(veh_feats, seq_pad_mask, vehicle_pad_mask)  # [B,N1,D]
+        logits = self.dec(cell_feats, enc, cell_pad=tgt_pad_mask)  # [B,N2,1]
         return logits
 
 
@@ -216,31 +287,32 @@ class CellQueryEncoder(nn.Module):
 class CellFromVehicleAndMap(nn.Module):
     def __init__(self):
         super().__init__()
-        self.cells_from_vehicles = CellsFromVehicles(9, 2, 64)
-        self.image_encoder = ImageBackbone(out_dim=64)
-        self.fusion = GatedFusion(64)
-        self.query_encoder = CellQueryEncoder(d_model=64, d_pos=2)
-        self.head = nn.Linear(64, 1)
+        self.cells_from_vehicles = CellsFromVehicles(d_vehicle_in=3, q_dim=16, d_model=64, nhead=4, Lenc=4, Ldec=4)
+        self.image_encoder = ImageBackbone(out_dim=128)
+        self.fusion = GatedFusion(d_veh=16, d_img=128, q_dim=16)
+        self.query_encoder = CellQueryEncoder(d_model=16, d_pos=2)
+        self.head = nn.Linear(16, 1)
 
-    def forward(self, veh_feats, cell_feats, seq_mask, mask, map):
+    def forward(self, veh_feats, cell_feats, seq_mask, cell_mask, vehicle_maks, map):
         """
         veh_feats: [B, N1, T, d_in]  (historical adjacent vehicles)
         cell_feats: [B, N2, d_in]    (hidden ogm cells)
         seq_mask: [B, N1, T]         (True=pad in vehicle history)
-        mask: [B, N2]                (True=valid cell, False=padded cell)
+        cell_mask: [B, N2]                (True=valid cell, False=padded cell)
         """
         h_veh = self.cells_from_vehicles(veh_feats, cell_feats,
-                                         src_pad_mask=seq_mask,
-                                         tgt_pad_mask=mask)  # [B,N2,1]
+                                         seq_pad_mask=seq_mask,
+                                         vehicle_pad_mask=vehicle_maks,
+                                         tgt_pad_mask=~cell_mask)  # [B,N2,1]
 
-        h_img = self.image_encoder(map.permute(0, 3, 1, 2))  # [B, D, Hf, Wf]
-        h_img = self.sample_cells_from_feat(h_img, cell_feats)  # [B, N2, D]
-        Q_cell = self.query_encoder(cell_feats, cell_valid=mask)  # [B,N2,D]
+        # h_img = self.image_encoder(map.permute(0, 3, 1, 2))  # [B, D, Hf, Wf]
+        # h_img = self.sample_cells_from_feat(h_img, cell_feats)  # [B, N2, D]
+        # Q_cell = self.query_encoder(cell_feats, cell_valid=cell_mask)  # [B,N2,D]
+        #
+        # H_fused, gates = self.fusion(Q_cell, h_veh, h_img)
+        # logits = self.head(H_fused)  # [B,N2,1]
 
-        H_fused, gates = self.fusion(Q_cell, h_veh, h_img)
-        logits = self.head(H_fused)  # [B,N2,1]
-
-        return logits
+        return h_veh
 
     def sample_cells_from_feat(self, feat_map, cell_xy_norm):
         """

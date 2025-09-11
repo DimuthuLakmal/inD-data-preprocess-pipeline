@@ -3,15 +3,27 @@ from torch import nn
 
 
 class GatedFusion(nn.Module):
-    def __init__(self, d):
+    def __init__(self, d_veh, d_img, q_dim=0, d_gate=128, use_cell_in_gate=True):
         super().__init__()
+        self.use_cell = use_cell_in_gate and q_dim > 0
+
+        # Gate computed in a small joint space
+        gate_in = d_veh + d_img + (q_dim if self.use_cell else 0)
         self.gate = nn.Sequential(
-            nn.LayerNorm(3*d),
-            nn.Linear(3*d, d),
+            nn.LayerNorm(gate_in),
+            nn.Linear(gate_in, d_gate),
             nn.GELU(),
-            nn.Linear(d, 1)
-        )  # outputs a scalar gate per cell
+            nn.Linear(d_gate, 1)
+        )
+        # Project img to veh space for mixing
+        self.img_to_veh = nn.Linear(d_img, d_veh)
+        self.out_ln = nn.LayerNorm(d_veh)
+
     def forward(self, h_cell, h_from_veh, h_from_img):
-        # h_cell: original cell token (query features) [B,N2,D]
-        g = torch.sigmoid(self.gate(torch.cat([h_cell, h_from_veh, h_from_img], dim=-1)))  # [B,N2,1]
-        return g * h_from_img + (1 - g) * h_from_veh, g  # fused features, gate for inspection
+        g_in = [h_from_veh, h_from_img]
+        if self.use_cell: g_in.append(h_cell)
+        g = torch.sigmoid(self.gate(torch.cat(g_in, dim=-1)))  # [B,N2,1]
+
+        i_in_veh = self.img_to_veh(h_from_img)                 # [B,N2,d_veh]
+        fused = g * i_in_veh + (1.0 - g) * h_from_veh          # [B,N2,d_veh]
+        return self.out_ln(fused), g

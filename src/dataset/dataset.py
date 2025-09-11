@@ -75,13 +75,16 @@ class OGMDataset(Dataset):
             for file in annotation_files:
                 key = file.split('.')[0]
                 scene_id = int(key.split('_')[0])
+                if not(scene_id == 18 or scene_id == 19):
+                    continue
+
                 with open(os.path.join(self.annotations_path, file), 'r') as f:
                     data = json.load(f)
                     normalised_data = []
                     hidden_ogm_cells_xys = []
                     for cell in data:
-                        normalised_data.append([cell['cx'] / self.background_images[scene_id].shape[1],
-                                               cell['cy'] / self.background_images[scene_id].shape[0],
+                        normalised_data.append([cell['cx'] / 2000,
+                                               cell['cy'] / 2000,
                                                cell['label']])
 
                         ego_vehicle_data = self.data_dict[key]["historical_ego_obs"][-1]
@@ -97,6 +100,9 @@ class OGMDataset(Dataset):
 
             keys = list(label_dict.keys()) # These are the frame keys selected for training/testing
             for key in keys:
+                key_elem = key.split('.')[0]
+                scene_id = int(key_elem.split('_')[0])
+
                 data_dict = self.data_dict[key]
                 ogm_cells, ogm_cells_xys = label_dict[key]
 
@@ -383,7 +389,7 @@ class OGMDataset(Dataset):
         seq_mask = np.all(historical_adjacent_no_e == 0, axis=-1)  # Create a sequence mask where all features are zeros
 
         input = {
-            "historical_adjacent_obs": historical_adjacent_no_e,
+            "historical_adjacent_obs": historical_adjacent_no_e[:, :, :3],
             "historical_ego_obs": np.array(historical_ego_obs, dtype=np.float32),
             "map_obs": map_resized.astype(np.float32),
             "ogm": ogm.astype(np.float32),

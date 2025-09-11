@@ -54,7 +54,7 @@ def custom_collate(batch):
             # Pad the tensors in the dictionary to the maximum length
             return_d['historical_adjacent_obs'] = _pad_batch(return_d['historical_adjacent_obs'])
             return_d['hidden_ogm_cells'] = _pad_batch(return_d['hidden_ogm_cells'])
-            return_d['seq_mask'] = _pad_batch(return_d['seq_mask'])
+            return_d['seq_mask'] = _pad_batch(return_d['seq_mask'], pad_value=1)
 
             # convert list of tensors to a torch tensor
             for key in return_d.keys():
@@ -64,6 +64,8 @@ def custom_collate(batch):
             # create masks using the historical observations (Will be used to mask out irrelevant cells later)
             mask = (return_d['hidden_ogm_cells'] != 0).all(dim=-1)
             return_d['mask'] = mask
+
+            return_d['vehicle_mask'] = (return_d['seq_mask'] != 0).all(dim=-1)
 
             # return_d['edge_index'] = return_d['edge_index'].permute(0, 2, 1)  # B, N, F -> B, F, N
 

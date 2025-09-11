@@ -56,10 +56,11 @@ def train(model, data_loader, config):
             mask = mask * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not padded
 
             seq_mask = inputs['seq_mask']  # Sequence mask for the historical observations
+            vehicle_mask = inputs['vehicle_mask']
             cell_feat = inputs['hidden_ogm_cells']
             veh_feat = inputs['historical_adjacent_obs']
             map = inputs['map_obs']
-            outputs = model(veh_feat, cell_feat, seq_mask, mask, map).squeeze()
+            outputs = model(veh_feat, cell_feat, seq_mask, mask, vehicle_mask, map).squeeze()
             outputs_sig = nn.Sigmoid()(outputs)
 
             # Calculate the binary cross-entropy loss

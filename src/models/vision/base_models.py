@@ -12,21 +12,41 @@ from torchvision.models.resnet import resnet18, resnet50
 from torchvision.models.feature_extraction import create_feature_extractor
 from torchvision.ops import RoIAlign
 
-class ImageBackbone(nn.Module):
-    """ResNet50 up to C5; outputs a stride-32 feature map [B, C, H', W']."""
-    def __init__(self, out_dim=256, pretrained=True):
+
+class FrameEncoder(nn.Module):
+    """
+    Map image -> per-frame embedding.
+    Input : imgs [B, T, 3, H, W]
+    Output: emb  [B, T, D]
+    """
+    def __init__(self, d_model=256, pretrained=True, global_pool='avg'):
         super().__init__()
         m = resnet50(weights="DEFAULT" if pretrained else None)
-        self.stem = nn.Sequential(m.conv1, m.bn1, m.relu, m.maxpool)  # /4
-        self.layer1, self.layer2, self.layer3, self.layer4 = m.layer1, m.layer2, m.layer3, m.layer4  # /8,/16,/32
-        c5 = 2048
-        self.proj = nn.Conv2d(c5, out_dim, kernel_size=1)  # project to D
 
-    def forward(self, img):  # img: [B,3,H,W]
-        x = self.stem(img)
-        x = self.layer1(x); x = self.layer2(x); x = self.layer3(x); x = self.layer4(x)  # [B,2048,H',W']
-        x = self.proj(x)  # [B,D,H',W']
-        return x
+        # Take ResNet trunk up to C5
+        self.backbone = nn.Sequential(
+            m.conv1, m.bn1, m.relu, m.maxpool,
+            m.layer1, m.layer2, m.layer3, m.layer4
+        )
+        c5 = 2048
+
+        # Project to d_model after global pooling
+        self.global_pool = global_pool
+        self.proj = nn.Linear(c5, d_model)
+
+    def forward(self, imgs):  # [B, T, 3, H, W]
+        x = imgs      # [B, 3, H, W]
+        f = self.backbone(x)
+
+        if self.global_pool == 'avg':
+            f = F.adaptive_avg_pool2d(f, 1).squeeze(-1).squeeze(-1)   # [B*T, 2048]
+        elif self.global_pool == 'max':
+            f = F.adaptive_max_pool2d(f, 1).squeeze(-1).squeeze(-1)
+        else:
+            raise ValueError("global_pool must be 'avg' or 'max'")
+
+        emb = self.proj(f)                          # [B*T, D]
+        return emb
 
 
 class SpatialSoftmax(nn.Module):

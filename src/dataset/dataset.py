@@ -351,25 +351,6 @@ class OGMDataset(Dataset):
         for cel in hidden_cell_polygon_xys:
             cv2.fillPoly(blank_img, [np.array(cel).astype(np.int32)], (255, 255, 255))
 
-        # Extract Ground Truth
-        # ego_track = self.tracks[(self.tracks["trackId"] == ego_vehicle_track_idx)
-        #                         & (self.tracks["recordingId"] == scene_id)].iloc[0].to_dict()
-        # ego_track_meta = self.tracks_meta[(self.tracks_meta["trackId"] == ego_vehicle_track_idx)
-        #                                   & (self.tracks_meta["recordingId"] == scene_id)].iloc[0].to_dict()
-        # pts_ego = self._extract_track_info(ego_track, ego_track_meta, current_frame, backgrond_img.shape)["pts"]
-        # heading_ego = self._get_heading(ego_track, ego_track_meta, current_frame)
-        #
-        # # Create OGM
-        # ogm, ogm_gt = create_OGM_ego(pts_ego.squeeze(), heading_ego, visible_tracks_pts, hidden_tracks_pts,
-        #                              gt_background_img, self.fixed_blocks_info[scene_id])
-        #
-        # # Remove distance feature from historical_adjacent_obs
-        # historical_adjacent_obs = np.array(list(historical_adjacent_obs.values()), dtype=np.float32)
-        # historical_adjacent_no_e = historical_adjacent_obs[:, :, :-1]
-        #
-        # # Extract the edge weights from the historical_adjacent_obs
-        # edge_weights = np.expand_dims(historical_adjacent_obs[:, :, -1], axis=-1)
-
         historical_adjacent_obs = np.array(list(historical_adjacent_obs.values()), dtype=np.float32)
         historical_adjacent_no_e = historical_adjacent_obs[:, :, :-1]
 

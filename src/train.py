@@ -31,7 +31,7 @@ def create_args():
 
 def train(model, data_loader, config):
     logging.basicConfig(
-        filename=config['log_file'],  # Specify the log file name
+        filename=config['model']['log_file'],  # Specify the log file name
         level=logging.INFO,  # Set the logging level (e.g., INFO, DEBUG, WARNING, ERROR, CRITICAL)
         format='%(asctime)s - %(levelname)s - %(message)s',  # Define the log message format
         filemode='a'  # Set the file mode to 'a' for append, or 'w' for overwrite

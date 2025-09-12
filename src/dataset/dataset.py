@@ -6,8 +6,8 @@ import torch
 from torch.utils.data import Dataset
 from typing import Tuple
 
-from src.utils.ogm_util import create_OGM_ego, get_vert
-from src.utils.tracks_import import read_from_csv
+from utils.ogm_util import create_OGM_ego, get_vert
+from utils.tracks_import import read_from_csv
 
 import json
 import sys

@@ -4,8 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.models.transformer.gated_fusion import GatedFusion
-from src.models.vision.base_models import FrameEncoder
+from models.transformer.gated_fusion import GatedFusion
+from models.vision.base_models import FrameEncoder
 
 
 # --- Small helpers ---
@@ -341,7 +341,7 @@ class CellQueryEncoder(nn.Module):
 class CellFromVehicleAndMap(nn.Module):
     def __init__(self):
         super().__init__()
-        self.cells_from_vehicles = CellsFromVehicles(d_vehicle_in=3, q_dim=16, d_model=64, nhead=4, Lenc=4, Ldec=4)
+        self.cells_from_vehicles = CellsFromVehicles(d_vehicle_in=3, q_dim=16, d_model=16, nhead=4, Lenc=4, Ldec=4)
         self.image_encoder = FrameEncoder(d_model=256, pretrained=True, global_pool='avg')
         self.fusion = GatedFusion(d_veh=16, d_img=256, q_dim=16, use_cell_in_gate=False)
         self.query_encoder = CellQueryEncoder(d_model=16, d_pos=2)

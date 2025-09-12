@@ -3,11 +3,11 @@ import argparse
 import torch
 import yaml
 
-from src.dataset.data_loader import OGMDataLoader
-from src.models.transformer.spatial_temporal_encoder_decoder import CellsFromVehicles, CellFromVehicleAndMap
+from dataset.data_loader import OGMDataLoader
+from models.transformer.spatial_temporal_encoder_decoder import CellsFromVehicles, CellFromVehicleAndMap
 import torch.nn as nn
 
-from src.utils.histogram import plot_histogram
+from utils.histogram import plot_histogram
 
 
 def create_args():

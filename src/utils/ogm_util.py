@@ -3,11 +3,11 @@ from copy import deepcopy
 
 import numpy as np
 import cv2
-from shapely import LineString
+from shapely.geometry import LineString
 from shapely.geometry import Polygon
 import matplotlib.pyplot as plt
 
-from src.utils.utils import get_driver_center
+from utils.utils import get_driver_center
 
 # ---- CONFIGURATION ----
 CELL_SIZE = 20

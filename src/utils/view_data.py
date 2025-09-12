@@ -6,7 +6,7 @@ import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 
-from src.utils.exponential_backoff import retry_with_exponential_backoff
+from utils.exponential_backoff import retry_with_exponential_backoff
 
 
 def _rot2d(theta):

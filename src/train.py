@@ -3,11 +3,11 @@ import argparse
 import torch
 import yaml
 
-from src.dataset.data_loader import OGMDataLoader
-from src.models.transformer.spatial_temporal_encoder_decoder import CellsFromVehicles, CellFromVehicleAndMap
+from dataset.data_loader import OGMDataLoader
+from models.transformer.spatial_temporal_encoder_decoder import CellsFromVehicles, CellFromVehicleAndMap
 import torch.nn as nn
 
-from src.utils.histogram import plot_histogram
+import logging
 
 
 def create_args():
@@ -28,6 +28,13 @@ def create_args():
 
 
 def train(model, data_loader, config):
+    logging.basicConfig(
+        filename='results/app.log',  # Specify the log file name
+        level=logging.INFO,  # Set the logging level (e.g., INFO, DEBUG, WARNING, ERROR, CRITICAL)
+        format='%(asctime)s - %(levelname)s - %(message)s',  # Define the log message format
+        filemode='a'  # Set the file mode to 'a' for append, or 'w' for overwrite
+    )
+
     model.train()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config['model']['lr'])
@@ -72,6 +79,7 @@ def train(model, data_loader, config):
             loss_aggregated = loss_aggregated * mask
             loss_aggregated = loss_aggregated.sum() / (mask.sum().clamp_min(1))
             loss = loss_fn(outputs_sig.view(-1), targets.view(-1))
+            accuracy = (outputs_sig.round() == targets).float().mean()
 
             optimizer.zero_grad()
             loss_aggregated.backward()
@@ -79,6 +87,7 @@ def train(model, data_loader, config):
 
             if batch_idx % 10 == 0:  # Log every 10 batches
                 print(f'Epoch {epoch}, Batch {batch_idx}, Loss: {loss_aggregated.item()}, Items: {torch.sum(mask.int())}')
+                logging.info(f'Epoch {epoch}, Batch {batch_idx}, Loss: {loss_aggregated.item()}, Accuracy: {accuracy.item()}')
 
                 connections = 0
                 for edge_weight in inputs['edge_weights']:
@@ -112,7 +121,7 @@ def train(model, data_loader, config):
 
 
 if __name__ == '__main__':
-    with open("../configs/config.yaml", "r") as stream:
+    with open("configs/config.yaml", "r") as stream:
         config = yaml.safe_load(stream)
         config['data']['batch_size'] = config['model']['train_batch_size']
 

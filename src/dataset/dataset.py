@@ -352,13 +352,13 @@ class OGMDataset(Dataset):
 
         # Create a black background image a size of background_img
         blank_img = np.zeros_like(backgrond_img[:, :, 0:1])  # Create a single channel image
-        cv2.fillPoly(blank_img, [np.array(hidden_cell_polygon_xys[random_ogm_cell_index]).astype(np.int32)], (255, 255, 255))
+        cv2.fillPoly(gt_background_img, [np.array(hidden_cell_polygon_xys[random_ogm_cell_index]).astype(np.int32)], (0, 102, 204))
 
         historical_adjacent_obs = np.array(list(historical_adjacent_obs.values()), dtype=np.float32)
         historical_adjacent_no_e = historical_adjacent_obs[:, :, :-1]
 
         # Visual representation of the map
-        map_resized = cv2.resize(self.background_images[scene_id], (224, 224), interpolation=cv2.INTER_AREA)
+        map_resized = cv2.resize(gt_background_img, (224, 224), interpolation=cv2.INTER_AREA)
         hidden_cells_resized = cv2.resize(blank_img, (224, 224), interpolation=cv2.INTER_AREA)
 
         # Normalize map and hiddden_cells_resized

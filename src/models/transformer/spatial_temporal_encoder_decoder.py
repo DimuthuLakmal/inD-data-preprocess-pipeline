@@ -21,66 +21,133 @@ class FFN(nn.Module):
     def forward(self, x): return self.net(x)
 
 
-class CrossAttention(nn.Module):
-    def __init__(self, q_dim: int, kv_dim: int, nhead: int = 4, head_dim: int = 32, dropout: float = 0.1):
+class TwoStageVehicleCrossAttn(nn.Module):
+    """
+    Two-stage cross-attention:
+      Stage A (temporal): per cell, attend over T for each vehicle separately.
+      Stage B (vehicles): per cell, attend over vehicles using the Stage-A summaries.
+
+    Inputs:
+      Q_cell   : [B, N2, q_dim]             (cell query tokens; small dim ok)
+      H_seq    : [B, N1, T, enc_dim]        (per-vehicle temporal encoder outputs)
+      time_pad : [B, N1, T] (bool)          True = PAD timestep (ignored)
+      veh_pad  : [B, N1]     (bool) or None True = PAD vehicle (ignored)
+
+    Output:
+      H_cell   : [B, N2, q_dim]             (updated cell features in q_dim space)
+      (optional) alpha_t, beta_v for inspection (see forward(..., return_attn=True))
+    """
+    def __init__(self, q_dim: int, enc_dim: int, nhead: int = 4, head_dim: int = 32,
+                 dropout: float = 0.1, ffn_mult: int = 4):
         super().__init__()
-        self.nhead   = nhead
-        self.head_dim= head_dim
-        self.d_attn  = nhead * head_dim
+        assert (q_dim > 0) and (enc_dim > 0)
+        self.nhead = nhead
+        self.head_dim = head_dim
+        self.d_attn = nhead * head_dim
 
-        self.Wq = nn.Linear(q_dim,  self.d_attn, bias=False)
-        self.Wk = nn.Linear(kv_dim, self.d_attn, bias=False)
-        self.Wv = nn.Linear(kv_dim, self.d_attn, bias=False)
+        # Stage A projections (time attention within each vehicle)
+        self.WqA = nn.Linear(q_dim,  self.d_attn, bias=False)
+        self.WkA = nn.Linear(enc_dim, self.d_attn, bias=False)
+        self.WvA = nn.Linear(enc_dim, self.d_attn, bias=False)
 
-        self.out = nn.Linear(self.d_attn, q_dim)
-        self.dropout = nn.Dropout(dropout)
+        # Stage B projections (vehicle attention using Stage-A summaries)
+        self.WkB = nn.Linear(self.d_attn, self.d_attn, bias=False)
+        self.WvB = nn.Linear(self.d_attn, self.d_attn, bias=False)
+
+        # Output projection back to q_dim + post-attn FFN
+        self.Wo  = nn.Linear(self.d_attn, q_dim)
         self.ln_q = nn.LayerNorm(q_dim)
         self.ln_o = nn.LayerNorm(q_dim)
+        self.ffn  = nn.Sequential(
+            nn.LayerNorm(q_dim),
+            nn.Linear(q_dim, ffn_mult*q_dim), nn.GELU(),
+            nn.Linear(ffn_mult*q_dim, q_dim),
+        )
+        self.drop = nn.Dropout(dropout)
 
-    def _reshape_heads(self, x):
-        # x: [B, L, d_attn] -> [B, nH, L, head_dim]
-        B, L, _ = x.shape
-        return x.view(B, L, self.nhead, self.head_dim).transpose(1, 2)
+    def _split_heads(self, x, B, L):
+        # x: [B, L, d_attn] -> [B, nH, L, Hd]
+        return x.view(B, L, self.nhead, self.head_dim).transpose(1, 2).contiguous()
 
-    def forward(self, Q, KV, key_padding_mask=None):
+    def forward(self, Q_cell, H_seq, time_pad, vehicle_pad_mask=None):
         """
-        Q : [B, N2, q_dim]
-        KV: [B, T,  kv_dim]
-        key_padding_mask: [B, T] bool (True=pad)
+        return_attn: if True, returns (H_cell, alpha_t, beta_v)
+            alpha_t: [B, nH, N2, N1, T]  (temporal weights per vehicle)
+            beta_v : [B, nH, N2, N1]     (vehicle weights)
         """
-        B, N2, _ = Q.shape
-        _,  T, _ = KV.shape
+        B, N2, qd = Q_cell.shape
+        _, N1, T, ed = H_seq.shape
 
-        q = self.ln_q(Q)
-        qh = self._reshape_heads(self.Wq(q))        # [B, nH, N2, Hd]
-        kh = self._reshape_heads(self.Wk(KV))       # [B, nH,  T, Hd]
-        vh = self._reshape_heads(self.Wv(KV))       # [B, nH,  T, Hd]
+        assert time_pad.shape == (B, N1, T)
+        if vehicle_pad_mask is None:
+            vehicle_pad_mask = torch.zeros(B, N1, dtype=torch.bool, device=Q_cell.device)
 
-        # scaled dot-product attention
-        scores = torch.matmul(qh, kh.transpose(-2, -1)) / (self.head_dim ** 0.5)  # [B,nH,N2,T]
-        if key_padding_mask is not None:
-            scores = scores.masked_fill(key_padding_mask[:, None, None, :], float('-inf'))
-        attn = F.softmax(scores, dim=-1)
-        attn = self.dropout(attn)
+        # ---- Pre-norm Q ----
+        Qn = self.ln_q(Q_cell)                               # [B,N2, q_dim]
 
-        ctx = torch.matmul(attn, vh)                # [B,nH,N2,Hd]
-        ctx = ctx.transpose(1, 2).contiguous().view(B, N2, self.d_attn)  # [B,N2,d_attn]
-        out = self.out(ctx)                          # [B,N2,q_dim]
-        out = self.ln_o(Q + out)                     # residual + norm
-        return out
+        # Projections
+        qA = self._split_heads(self.WqA(Qn), B, N2)          # [B,nH,N2,Hd]
+        kA = self._split_heads(self.WkA(H_seq.view(B*N1*T, ed)).view(B, N1*T, -1), B, N1*T)
+        vA = self._split_heads(self.WvA(H_seq.view(B*N1*T, ed)).view(B, N1*T, -1), B, N1*T)
+        # Reshape kA/vA to [B,nH,N1,T,Hd]
+        kA = kA.view(B, self.nhead, N1, T, self.head_dim)
+        vA = vA.view(B, self.nhead, N1, T, self.head_dim)
+
+        # ---- Stage A: temporal attention within each vehicle ----
+        # scoresA: [B,nH,N2,N1,T] = qA · kA^T (over Hd)
+        # qA: [B,nH,N2,Hd], kA: [B,nH,N1,T,Hd]
+        scoresA = torch.einsum('bhid,bhntd->bhint', qA, kA) / (self.head_dim ** 0.5)
+
+        # Mask padded timesteps
+        # time_pad: [B,N1,T] True=pad -> expand to [B,1,1,N1,T]
+        scoresA = scoresA.masked_fill(time_pad[:, None, None, :, :], float('-inf'))
+        alpha_t = torch.softmax(scoresA, dim=-1)             # over T
+        alpha_t = torch.nan_to_num(alpha_t, nan=0.0)         # handle all-pad edge cases
+
+        # context per vehicle: [B,nH,N2,N1,Hd]
+        ctxA = torch.einsum('bhint,bhntd->bhind', alpha_t, vA)
+
+        # Merge heads across Hd per vehicle: [B,N2,N1,d_attn]
+        ctxA = ctxA.transpose(1, 2).contiguous().view(B, N2, N1, self.d_attn)
+
+        # ---- Stage B: attention across vehicles ----
+        kB = self._split_heads(self.WkB(ctxA.view(B*N2*N1, self.d_attn)).view(B, N2*N1, -1), B, N2*N1)
+        vB = self._split_heads(self.WvB(ctxA.view(B*N2*N1, self.d_attn)).view(B, N2*N1, -1), B, N2*N1)
+        # reshape per cell: [B,nH,N2,N1,Hd]
+        kB = kB.view(B, self.nhead, N2, N1, self.head_dim)
+        vB = vB.view(B, self.nhead, N2, N1, self.head_dim)
+
+        # reuse qA (same queries) for vehicle attention
+        # scoresB: [B,nH,N2,N1] = qA · kB (over Hd)
+        scoresB = torch.einsum('bhid,bhind->bhin', qA, kB)
+
+        # Mask padded vehicles: veh_pad [B,N1] True=pad -> [B,1,1,N1]
+        scoresB = scoresB.masked_fill(vehicle_pad_mask[:, None, None, :], float('-inf'))
+        beta_v = torch.softmax(scoresB / (self.head_dim ** 0.5), dim=-1)
+        beta_v = torch.nan_to_num(beta_v, nan=0.0)
+
+        # Final context per head: [B,nH,N2,Hd]
+        ctxB = torch.einsum('bh in, b h i n d -> b h i d', beta_v, vB)
+        # Merge heads -> [B,N2,d_attn]
+        ctxB = ctxB.transpose(1, 2).contiguous().view(B, N2, self.d_attn)
+
+        # Output proj back to q_dim + residual + FFN
+        out = self.Wo(self.drop(ctxB))                       # [B,N2,q_dim]
+        h  = self.ln_o(Q_cell + out)
+        return h
 
 
 class CellDecoderBlock(nn.Module):
     def __init__(self, q_dim: int, kv_dim: int, nhead=4, head_dim=32, dropout=0.1):
         super().__init__()
-        self.cross = CrossAttention(q_dim, kv_dim, nhead=nhead, head_dim=head_dim, dropout=dropout)
+        self.cross = TwoStageVehicleCrossAttn(q_dim, kv_dim, nhead=nhead, head_dim=head_dim, dropout=dropout)
         self.ffn = nn.Sequential(
             nn.LayerNorm(q_dim),
             nn.Linear(q_dim, 4*q_dim), nn.GELU(), nn.Linear(4*q_dim, q_dim)
         )
 
-    def forward(self, Q_cell, H_enc, key_padding_mask=None):
-        h = self.cross(Q_cell, H_enc, key_padding_mask)
+    def forward(self, Q_cell, H_enc, key_padding_mask=None, vehicle_pad_mask=None):
+        h = self.cross(Q_cell, H_enc, key_padding_mask, vehicle_pad_mask)
         h = h + self.ffn(h)
         return h  # [B,N2,q_dim]
 
@@ -105,18 +172,20 @@ class SinusoidalPosEnc(nn.Module):
 class VehicleTemporalEncoder(nn.Module):
     """
     Inputs:
-      x            : [B, N1, T, d_in]
-      time_valid   : [B, N1, T]   (bool) True = real timestep, False = pad
-      veh_valid    : [B, N1]      (bool) optional; if provided, invalid vehicles are zeroed in output
+      x         : [B, N1, T, d_in]
+      time_pad  : [B, N1, T]  (bool) True = PAD (ignored by attention), False = valid
+      veh_pad   : [B, N1]     (bool) optional; True = PAD vehicle (zero out output)
 
-    Output:
-      h_veh        : [B, N1, d_model]  (one embedding per vehicle)
+    Outputs:
+      h_seq     : [B, N1, T, d_model]  (per-vehicle sequence embeddings)
+      h_cls     : [B, N1, d_model]     (optional; only if return_cls=True)
     """
-
-    def __init__(self, d_in, d_model=128, nhead=4, num_layers=2, dropout=0.1):
+    def __init__(self, d_in, d_model=128, nhead=4, num_layers=2, dropout=0.1, use_cls=False):
         super().__init__()
+        self.use_cls = use_cls
+
         self.proj_in = nn.Linear(d_in, d_model)
-        self.posenc = SinusoidalPosEnc(d_model)
+        self.posenc  = SinusoidalPosEnc(d_model)
 
         enc_layer = nn.TransformerEncoderLayer(
             d_model=d_model, nhead=nhead,
@@ -125,48 +194,32 @@ class VehicleTemporalEncoder(nn.Module):
         )
         self.encoder = nn.TransformerEncoder(enc_layer, num_layers=num_layers)
 
-        # One learnable CLS token shared across vehicles (expanded per sequence)
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
-        nn.init.normal_(self.cls_token, mean=0.0, std=0.02)
+        self.ln_tok = nn.LayerNorm(d_model)
+        self.ln_cls = nn.LayerNorm(d_model) if self.use_cls else None
 
-        self.ln_out = nn.LayerNorm(d_model)
-
-    def forward(self, x, time_maks, veh_maks=None):
+    def forward(self, x, time_pad, veh_pad=None):
         """
-        x: [B, N1, T, d_in]
-        time_valid: [B, N1, T]  (True=pad, False=keep). Required.
-        veh_valid:  [B, N1]     (True=keep). Optional; if given, will zero invalid outputs.
+        time_pad: True=pad, False=valid (PyTorch src_key_padding_mask convention)
+        return_cls: if True and use_cls=True, also returns per-vehicle CLS summary
         """
-        B, N1, T, d_in = x.shape
-        assert time_maks.shape == (B, N1, T), "time_valid must be [B,N1,T] bool"
+        B, N1, T, _ = x.shape
+        assert time_pad.shape == (B, N1, T)
 
-        # Flatten vehicles into batch axis for per-vehicle temporal encoding
-        x = self.proj_in(x).view(B * N1, T, -1)  # [B*N1, T, D]
-        pad_t = time_maks.view(B * N1, T)  # True = pad (Transformer convention)
+        # per-vehicle temporal encoding (no mixing between vehicles)
+        x = self.proj_in(x).view(B * N1, T, -1)          # [B*N1, T, D]
+        pad_t = time_pad.view(B * N1, T)                 # [B*N1, T], True=pad
 
-        # Prepend CLS (not padded)
-        cls = self.cls_token.expand(B * N1, 1, -1)  # [B*N1, 1, D]
-        x = torch.cat([cls, x], dim=1)  # [B*N1, T+1, D]
+        x = self.posenc(x)                             # [B*N1, T, D]
+        h = self.encoder(x, src_key_padding_mask=pad_t)# [B*N1, T, D]
+        h_seq = self.ln_tok(h).view(B, N1, T, -1)      # [B, N1, T, D]
 
-        # Build padding mask for T+1 (CLS is always valid => False)
-        cls_pad = torch.zeros(B * N1, 1, dtype=torch.bool, device=pad_t.device)
-        src_key_padding_mask = torch.cat([cls_pad, pad_t], dim=1)  # [B*N1, T+1], True=pad
+        # Optionally zero out invalid vehicles
+        if veh_pad is not None:
+            assert veh_pad.shape == (B, N1)
+            h_seq = h_seq * (~veh_pad).unsqueeze(-1).unsqueeze(-1)
 
-        # Add positional encodings (T+1 because of CLS at position 0)
-        x = self.posenc(x)
-
-        # Encode (self-attn over time per vehicle)
-        h = self.encoder(x, src_key_padding_mask=src_key_padding_mask)  # [B*N1, T+1, D]
-
-        # Take CLS as per-vehicle summary
-        h_cls = h[:, 0, :]  # [B*N1, D]
-        h_veh = self.ln_out(h_cls).view(B, N1, -1)  # [B, N1, D]
-
-        if veh_maks is not None:
-            assert veh_maks.shape == (B, N1)
-            h_veh = h_veh * ~veh_maks.unsqueeze(-1)
-
-        return h_veh
+        h_seq = torch.nan_to_num(h_seq, nan=0.0)
+        return h_seq
 
 
 class CellQueryEmb(nn.Module):
@@ -219,11 +272,11 @@ class CellDecoder(nn.Module):
         ])
         self.head = nn.Linear(q_dim, 1)
 
-    def forward(self, Q_cell, H_enc, key_padding_mask=None, cell_pad=None):
+    def forward(self, Q_cell, H_enc, key_padding_mask=None, cell_pad=None, vehicle_pad_mask=None):
         h = Q_cell
         h = self.q_emb(h, cell_pad)
         for blk in self.blocks:
-            h = blk(h, H_enc, key_padding_mask)
+            h = blk(h, H_enc, key_padding_mask, vehicle_pad_mask)
         if cell_pad is not None:
             h = h.masked_fill(cell_pad.unsqueeze(-1), 0.0)
         return h # [B,N2,1]
@@ -237,7 +290,7 @@ class CellsFromVehicles(nn.Module):
 
     def forward(self, veh_feats, cell_feats, seq_pad_mask=None, vehicle_pad_mask=None, tgt_pad_mask=None):
         enc = self.enc(veh_feats, seq_pad_mask, vehicle_pad_mask)  # [B,N1,D]
-        logits = self.dec(cell_feats, enc, cell_pad=tgt_pad_mask)  # [B,N2,1]
+        logits = self.dec(cell_feats, enc, cell_pad=tgt_pad_mask, key_padding_mask=seq_pad_mask, vehicle_pad_mask=vehicle_pad_mask)  # [B,N2,1]
         return logits
 
 
@@ -289,7 +342,7 @@ class CellFromVehicleAndMap(nn.Module):
     def __init__(self):
         super().__init__()
         self.cells_from_vehicles = CellsFromVehicles(d_vehicle_in=3, q_dim=16, d_model=64, nhead=4, Lenc=4, Ldec=4)
-        self.image_encoder = FrameEncoder(d_model=256, pretrained=False, global_pool='avg')
+        self.image_encoder = FrameEncoder(d_model=256, pretrained=True, global_pool='avg')
         self.fusion = GatedFusion(d_veh=16, d_img=256, q_dim=16, use_cell_in_gate=False)
         self.query_encoder = CellQueryEncoder(d_model=16, d_pos=2)
         self.head = nn.Linear(16, 1)
@@ -327,3 +380,4 @@ class CellFromVehicleAndMap(nn.Module):
         # grid is in (x,y) order in [-1,1]; align_corners=False matches torchvision defaults
         sampled = F.grid_sample(feat_map, grid, mode='bilinear', align_corners=False)  # [B, D, 1, N2]
         return sampled.squeeze(2).transpose(1, 2)  # [B, N2, D]
+

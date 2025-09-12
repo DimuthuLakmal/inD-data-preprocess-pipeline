@@ -59,8 +59,8 @@ def train(model, data_loader, config):
             vehicle_mask = inputs['vehicle_mask']
             cell_feat = inputs['hidden_ogm_cells']
             veh_feat = inputs['historical_adjacent_obs']
-            map = inputs['map_obs']
-            outputs = model(veh_feat, cell_feat, seq_mask, mask, vehicle_mask, map).squeeze(-1)
+            map_img = inputs['map_obs']
+            outputs = model(veh_feat, cell_feat, seq_mask, mask, vehicle_mask, map_img).squeeze(-1)
             outputs_sig = nn.Sigmoid()(outputs)
 
             # Calculate the binary cross-entropy loss

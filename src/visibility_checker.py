@@ -3,7 +3,7 @@ import math
 import matplotlib
 from matplotlib.backend_bases import MouseButton
 
-from src.utils.utils import get_rear_fov_polygons, get_driver_center
+from utils.utils import get_rear_fov_polygons, get_driver_center
 
 matplotlib.use('qt5agg')
 

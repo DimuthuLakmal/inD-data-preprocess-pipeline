@@ -24,7 +24,7 @@ from torch_geometric.utils import (
 )
 from torch_geometric.utils.sparse import set_sparse_value
 
-from src.models.gat.message_passing import MessagePassing
+from models.gat.message_passing import MessagePassing
 
 if typing.TYPE_CHECKING:
     from typing import overload

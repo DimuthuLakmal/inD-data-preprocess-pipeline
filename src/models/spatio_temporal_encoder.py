@@ -1,14 +1,14 @@
 import torch
 from torch import nn
 
-from src.models.gat.gat_layer import GATLayer
-from src.models.transformer.cell_guided_cross_attention import CellGuidedCrossAttention
-from src.models.transformer.expert_gating import TwoExpertGatedFusion
-from src.models.transformer.graph_weight_encoder import GraphWeightEncoder
-from src.models.transformer.map_encoder_attn import MapEncoderAttention
-from src.models.transformer.temporal_encoder import TemporalEncoder
-from src.models.unet.unet import UNet, AttU_Net
-from src.models.vision.map_encoder import MapEncoder
+from models.gat.gat_layer import GATLayer
+from models.transformer.cell_guided_cross_attention import CellGuidedCrossAttention
+from models.transformer.expert_gating import TwoExpertGatedFusion
+from models.transformer.graph_weight_encoder import GraphWeightEncoder
+from models.transformer.map_encoder_attn import MapEncoderAttention
+from models.transformer.temporal_encoder import TemporalEncoder
+from models.unet.unet import UNet, AttU_Net
+from models.vision.map_encoder import MapEncoder
 
 
 class SGATTransformer(nn.Module):

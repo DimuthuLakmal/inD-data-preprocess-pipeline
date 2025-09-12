@@ -1,8 +1,8 @@
 from torch import nn
 
-from src.models.transformer.cross_attention import CrossAttentionLayer
-from src.models.transformer.multi_head_attention import MultiHeadAttention
-from src.models.transformer.position_wise_feed_forward import PositionWiseFeedForward
+from models.transformer.cross_attention import CrossAttentionLayer
+from models.transformer.multi_head_attention import MultiHeadAttention
+from models.transformer.position_wise_feed_forward import PositionWiseFeedForward
 
 
 class DecoderBlock(nn.Module):

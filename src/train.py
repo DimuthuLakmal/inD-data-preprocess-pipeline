@@ -3,12 +3,12 @@ import argparse
 import torch
 import yaml
 
-from src.dataset.data_loader import OGMDataLoader
-from src.models.spatio_temporal_encoder import SGATTransformer
-from src.models.transformer.graph_weight_encoder import GraphWeightEncoder
+from dataset.data_loader import OGMDataLoader
+from models.spatio_temporal_encoder import SGATTransformer
+from models.transformer.graph_weight_encoder import GraphWeightEncoder
 import torch.nn as nn
 
-from src.utils.histogram import plot_histogram
+from utils.histogram import plot_histogram
 
 
 def create_args():

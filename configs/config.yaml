@@ -5,7 +5,7 @@ model:
   train_batch_size: 8
   test_batch_size: 16
   train_epochs: 100
-  model_output_path: "../results/checkpoints/final.pt" # save trained model to this path
+  model_output_path: "results/checkpoints/final.pt" # save trained model to this path
   load_saved_model: False # if you want pre-trained model weights to be loaded
   model_input_path: "output/model/pems08/epoch_58_model.pt" # pretrained model path
   device: cpu # decides GPU or CPU for training

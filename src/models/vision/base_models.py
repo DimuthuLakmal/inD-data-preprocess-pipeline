@@ -13,6 +13,41 @@ from torchvision.models.feature_extraction import create_feature_extractor
 from torchvision.ops import RoIAlign
 
 
+class FrameEncoder(nn.Module):
+    """
+    Map image -> per-frame embedding.
+    Input : imgs [B, T, 3, H, W]
+    Output: emb  [B, T, D]
+    """
+    def __init__(self, d_model=256, pretrained=True, global_pool='avg'):
+        super().__init__()
+        m = resnet50(weights="DEFAULT" if pretrained else None)
+
+        # Take ResNet trunk up to C5
+        self.backbone = nn.Sequential(
+            m.conv1, m.bn1, m.relu, m.maxpool,
+            m.layer1, m.layer2, m.layer3, m.layer4
+        )
+        c5 = 2048
+
+        # Project to d_model after global pooling
+        self.global_pool = global_pool
+        self.proj = nn.Linear(c5, d_model)
+
+    def forward(self, imgs):  # [B, T, 3, H, W]
+        x = imgs      # [B, 3, H, W]
+        f = self.backbone(x)
+
+        if self.global_pool == 'avg':
+            f = F.adaptive_avg_pool2d(f, 1).squeeze(-1).squeeze(-1)   # [B*T, 2048]
+        elif self.global_pool == 'max':
+            f = F.adaptive_max_pool2d(f, 1).squeeze(-1).squeeze(-1)
+        else:
+            raise ValueError("global_pool must be 'avg' or 'max'")
+
+        emb = self.proj(f)
+        return emb
+
 class SpatialSoftmax(nn.Module):
     """
     Spatial Softmax Layer.

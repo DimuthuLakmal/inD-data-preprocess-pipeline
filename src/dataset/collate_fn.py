@@ -54,7 +54,7 @@ def custom_collate(batch):
             # Pad the tensors in the dictionary to the maximum length
             return_d['historical_adjacent_obs'] = _pad_batch(return_d['historical_adjacent_obs'])
             return_d['hidden_ogm_cells'] = _pad_batch(return_d['hidden_ogm_cells'])
-            return_d['seq_mask'] = _pad_batch(return_d['seq_mask'])
+            return_d['seq_mask'] = _pad_batch(return_d['seq_mask'], pad_value=1)
 
             # convert list of tensors to a torch tensor
             for key in return_d.keys():
@@ -65,21 +65,8 @@ def custom_collate(batch):
             mask = (return_d['hidden_ogm_cells'] != 0).all(dim=-1)
             return_d['mask'] = mask
 
-            # return_d['edge_index'] = return_d['edge_index'].permute(0, 2, 1)  # B, N, F -> B, F, N
+            return_d['vehicle_mask'] = (return_d['seq_mask'] != 0).all(dim=-1)
 
-            # return_d['mask'] = return_d['mask'].squeeze()
-            #
-            # # Once the padding is done, calculate the edge indexes
-            # mask = return_d['mask'].permute(0, 2, 1)  # B, N, T -> B, T, N
-            # b, t, n = mask.shape
-            #
-            # edge_index_src = torch.arange(0, n).unsqueeze(0).repeat(t, 1).unsqueeze(0).repeat(b, 1, 1).to(mask.device)  # B, T, N
-            # edge_index_dst = torch.zeros_like(edge_index_src).to(mask.device)  # Initialize with zeros
-            #
-            # edge_index_src = torch.where(mask > 0, edge_index_src, 0)
-            # edge_index = torch.stack([edge_index_src, edge_index_dst], dim=1)
-            #
-            # return_d['edge_index'] = edge_index
             return return_d
 
         else:

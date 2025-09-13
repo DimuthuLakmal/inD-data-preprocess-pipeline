@@ -60,7 +60,7 @@ def train(model, data_loader, config):
                     inputs[k] = v.to(config['model']["device"])
 
             mask = inputs['mask'] # Sequence mask for the historical observations
-            outputs = model(inputs).squeeze()
+            outputs = model(inputs).squeeze(-1)
             outputs_sig = nn.Sigmoid()(outputs)
 
             # Calculate the binary cross-entropy loss

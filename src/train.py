@@ -36,8 +36,6 @@ def train(model, train_data_loader, valid_data_loader, config):
         filemode='a'  # Set the file mode to 'a' for append, or 'w' for overwrite
     )
 
-    model.train()
-
     optimizer = torch.optim.Adam(model.parameters(), lr=config['model']['lr'])
     optimizer.zero_grad()
     loss_fn_aggregated = nn.BCEWithLogitsLoss(reduction='none')
@@ -49,9 +47,10 @@ def train(model, train_data_loader, valid_data_loader, config):
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
 
     for epoch in range(config['model']['train_epochs']):  # Example: 10 epochs
+        model.train()
 
         total_loss = 0.0
-        total_data_points = 0
+        batch_itr = 0
 
         for batch_idx, (inputs, target) in enumerate(train_data_loader):
 
@@ -76,21 +75,21 @@ def train(model, train_data_loader, valid_data_loader, config):
 
             loss_aggregated = loss_fn_aggregated(outputs, targets)
             loss_aggregated = loss_aggregated * mask
-            loss_aggregated = loss_aggregated.sum() / (mask.sum().clamp_min(1))
+            loss_avg = loss_aggregated.sum() / (mask.sum().clamp_min(1))
             accuracy = (outputs_sig.round() == targets).float().mean()
 
-            total_loss += loss_aggregated.item()
-            total_data_points += (mask.sum().clamp_min(1))
+            total_loss += loss_avg.item()
+            batch_itr += 1
 
             optimizer.zero_grad()
-            loss_aggregated.backward()
+            loss_avg.backward()
             optimizer.step()
 
             if batch_idx % 10 == 0:  # Log every 10 batches
                 print(
-                    f'Train Epoch {epoch}, Batch {batch_idx}, Loss: {loss_aggregated.item()}, Items: {torch.sum(mask.int())}')
+                    f'Train Epoch {epoch}, Batch {batch_idx}, Loss: {loss_avg.item()}, Items: {torch.sum(mask.int())}')
                 logging.info(
-                    f'Train Epoch {epoch}, Batch {batch_idx}, Loss: {loss_aggregated.item()}, Accuracy: {accuracy.item()}')
+                    f'Train Epoch {epoch}, Batch {batch_idx}, Loss: {loss_avg.item()}, Accuracy: {accuracy.item()}')
 
                 connections = 0
                 for edge_weight in inputs['edge_weights']:
@@ -99,7 +98,7 @@ def train(model, train_data_loader, valid_data_loader, config):
                 print(
                     'Connections: {}, avg nodes: {}'.format(connections, (connections / torch.sum(mask.int())).item()))
 
-        train_loss = total_loss / total_data_points
+        train_loss = total_loss / batch_itr
 
         print(f'Epoch {epoch}, Training Loss: {train_loss}')
         logging.info(f'Epoch {epoch}, Training Loss: {train_loss}')

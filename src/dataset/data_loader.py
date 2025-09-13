@@ -9,10 +9,8 @@ class OGMDataLoader():
         self.cfg = cfg
         self.phase = phase
 
-    def create_dataloader(self):
-        dataset = OGMDataset(self.cfg)
-        # for i, sample in enumerate(dataset):
-        #     print(i, sample)
+    def create_dataloader(self, phase=None):
+        dataset = OGMDataset(self.cfg, self.phase)
 
         dataloader = DataLoader(dataset=dataset,
                                 batch_size=self.cfg['batch_size'],

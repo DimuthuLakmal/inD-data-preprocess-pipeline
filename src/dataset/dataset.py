@@ -28,7 +28,7 @@ from utils.view_data import draw_circle
 class OGMDataset(Dataset):
     """Face Landmarks dataset."""
 
-    def __init__(self, config):
+    def __init__(self, config, phase):
 
         scene_ids = set()
         for fname in os.listdir(config['dataset_dir']):
@@ -40,7 +40,7 @@ class OGMDataset(Dataset):
         print(f"Found scenes: {scene_ids}")
 
         self.input_path = config['dataset_dir']
-        self.annotations_path = config['label_dir']
+        self.annotations_path = config['label_dir'] + '/' + phase
 
         self.history_length = config["history_length"]
 

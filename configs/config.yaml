@@ -1,6 +1,6 @@
 # Model Configs
 model:
-  lr: 0.0005 # learning rate
+  lr: 0.0001 # learning rate
   use_lr_scheduler: True # if you want to use learning rate scheduler
   train_batch_size: 8
   test_batch_size: 16
@@ -30,7 +30,7 @@ model:
     ogm_input_dim: 2
     dim_model: 16
     dim_edge: 1
-    num_heads: 8
+    num_heads: 4
     dropout: 0.2
   unet:
     ogm_input_dim: 2

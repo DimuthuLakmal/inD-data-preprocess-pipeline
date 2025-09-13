@@ -59,7 +59,11 @@ def train(model, data_loader, config):
                 if k != 'edge_index' and k != 'edge_weights':
                     inputs[k] = v.to(config['model']["device"])
 
-            mask = inputs['mask'] # Sequence mask for the historical observations
+            mask = inputs['mask']  # Mask indicates the non-padded cells (1: valid, 0: padded)
+            # Masking is applied to ignore unwanted cells
+            mask_fixed_blocks = (targets != 3).squeeze(-1)  # Cells occupied with fixed blocks are marked with a 3 in the target
+            mask = mask * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not padded
+
             outputs = model(inputs).squeeze(-1)
             outputs_sig = nn.Sigmoid()(outputs)
 

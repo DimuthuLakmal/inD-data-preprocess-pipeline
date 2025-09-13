@@ -13,7 +13,7 @@ def evaluate(model, valid_data_loader, device):
     with torch.no_grad():  # Example: 10 epochs
 
         total_loss = 0.0
-        total_data_points = 0
+        batch_itr = 0
 
         for batch_idx, (inputs, target) in enumerate(valid_data_loader):
 
@@ -42,7 +42,7 @@ def evaluate(model, valid_data_loader, device):
             accuracy = (outputs_sig.round() == targets).float().mean()
 
             total_loss += loss_aggregated.item()
-            total_data_points += (mask.sum().clamp_min(1))
+            batch_itr += 1
 
             if batch_idx % 10 == 0:  # Log every 10 batches
                 print(
@@ -57,6 +57,6 @@ def evaluate(model, valid_data_loader, device):
                 print(
                     'Connections: {}, avg nodes: {}'.format(connections, (connections / torch.sum(mask.int())).item()))
 
-        valid_loss = total_loss / total_data_points
+        valid_loss = total_loss / batch_itr
 
     return valid_loss

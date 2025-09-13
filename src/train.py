@@ -1,4 +1,5 @@
 import argparse
+import logging
 
 import torch
 import yaml
@@ -8,7 +9,7 @@ from models.spatio_temporal_encoder import SGATTransformer
 from models.transformer.graph_weight_encoder import GraphWeightEncoder
 import torch.nn as nn
 
-from utils.histogram import plot_histogram
+# from utils.histogram import plot_histogram
 
 
 def create_args():
@@ -29,6 +30,13 @@ def create_args():
 
 
 def train(model, data_loader, config):
+    logging.basicConfig(
+        filename=config['model']['log_file'],  # Specify the log file name
+        level=logging.INFO,  # Set the logging level (e.g., INFO, DEBUG, WARNING, ERROR, CRITICAL)
+        format='%(asctime)s - %(levelname)s - %(message)s',  # Define the log message format
+        filemode='a'  # Set the file mode to 'a' for append, or 'w' for overwrite
+    )
+
     model.train()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config['model']['lr'])
@@ -51,17 +59,12 @@ def train(model, data_loader, config):
                 if k != 'edge_index' and k != 'edge_weights':
                     inputs[k] = v.to(config['model']["device"])
 
-            mask = inputs['mask']  # Mask indicates the non-padded cells (1: valid, 0: padded)
-            seq_mask = inputs['seq_mask']  # Sequence mask for the historical observations
-            outputs = model(inputs, seq_mask).squeeze()
+            mask = inputs['mask'] # Sequence mask for the historical observations
+            outputs = model(inputs).squeeze()
             outputs_sig = nn.Sigmoid()(outputs)
 
             # Calculate the binary cross-entropy loss
-            # Masking is applied to ignore unwanted cells
-            mask_fixed_blocks = (targets != 3).squeeze()  # Cells occupied with fixed blocks are marked with a 3 in the target
-            mask = mask * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not padded
-
-            targets = targets.squeeze() * mask
+            targets = targets.squeeze(-1) * mask
             outputs = outputs * mask  # Apply mask to outputs
             outputs_sig = outputs_sig * mask  # Apply mask to outputs
 
@@ -69,37 +72,24 @@ def train(model, data_loader, config):
             loss_aggregated = loss_aggregated * mask
             loss_aggregated = loss_aggregated.sum() / (mask.sum().clamp_min(1))
             loss = loss_fn(outputs_sig.view(-1), targets.view(-1))
+            accuracy = (outputs_sig.round() == targets).float().mean()
 
             optimizer.zero_grad()
             loss_aggregated.backward()
             optimizer.step()
 
             if batch_idx % 10 == 0:  # Log every 10 batches
-                print(f'Epoch {epoch}, Batch {batch_idx}, Loss: {loss_aggregated.item()}, Items: {torch.sum(mask.int())}')
+                print(
+                    f'Epoch {epoch}, Batch {batch_idx}, Loss: {loss_aggregated.item()}, Items: {torch.sum(mask.int())}')
+                logging.info(
+                    f'Epoch {epoch}, Batch {batch_idx}, Loss: {loss_aggregated.item()}, Accuracy: {accuracy.item()}')
 
                 connections = 0
                 for edge_weight in inputs['edge_weights']:
                     connections += edge_weight.shape[0]
 
-                print('Connections: {}, avg nodes: {}'.format(connections, (connections/torch.sum(mask.int())).item()))
-
-                map_1, map_2, map_3 = 0, 0, 0
-                # if not first_batch:
-                    # for id in scene_ids:
-                    #     if id <= 6:
-                    #         map_1 += 1
-                    #     elif 7 <= id <= 17:
-                    #         map_2 += 1
-                    #     else:
-                    #         map_3 += 1
-                    # print('Map 1: {}, Map 2: {}, Map 3: {}, Loss: {}'.format(map_1, map_2, map_3, loss.item()))
-                # else:
-                #     first_batch = False
-
-                # if not first_batch:
-                #     plot_histogram(inputs['historical_adjacent_obs'], loss.item())
-                # else:
-                #     first_batch = False
+                print(
+                    'Connections: {}, avg nodes: {}'.format(connections, (connections / torch.sum(mask.int())).item()))
 
         if config['model']['use_lr_scheduler']:
             lr_scheduler.step()
@@ -109,7 +99,7 @@ def train(model, data_loader, config):
 
 
 if __name__ == '__main__':
-    with open("../configs/config.yaml", "r") as stream:
+    with open("configs/config.yaml", "r") as stream:
         config = yaml.safe_load(stream)
         config['data']['batch_size'] = config['model']['train_batch_size']
 

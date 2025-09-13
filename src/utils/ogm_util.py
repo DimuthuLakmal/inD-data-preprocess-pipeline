@@ -3,7 +3,7 @@ from copy import deepcopy
 
 import numpy as np
 import cv2
-from shapely import LineString
+from shapely.geometry import LineString
 from shapely.geometry import Polygon
 import matplotlib.pyplot as plt
 

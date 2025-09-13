@@ -104,6 +104,10 @@ class OGMDataset(Dataset):
                 data_dict = self.data_dict[key]
                 ogm_cells, ogm_cells_xys = label_dict[key]
 
+                random_index = random.randint(0, len(label_dict[key][0]) - 1)
+                ogm_cells = [ogm_cells[random_index]]
+                ogm_cells_xys = [ogm_cells_xys[random_index]]
+
                 historical_adjacent_obs, hidden_ogm_cells = (data_dict["historical_adjacent_obs"], data_dict["hidden_ogm_cells"])
                 last_recorded_t = {}
                 for i, (veh_index, obs) in enumerate(historical_adjacent_obs.items()):
@@ -347,32 +351,16 @@ class OGMDataset(Dataset):
         # Create a black background image a size of background_img
         blank_img = np.zeros_like(backgrond_img[:, :, 0:1])  # Create a single channel image
         for cel in hidden_cell_polygon_xys:
-            cv2.fillPoly(blank_img, [np.array(cel).astype(np.int32)], (255, 255, 255))
+            cv2.fillPoly(gt_background_img, [np.array(cel).astype(np.int32)], (0, 102, 204))
 
         historical_adjacent_obs = np.array(list(historical_adjacent_obs.values()), dtype=np.float32)
         historical_adjacent_no_e = historical_adjacent_obs[:, :, :-1]
 
         hidden_ogm_cells = np.array(data_dict["hidden_ogm_cells"], dtype=np.float32)
 
-        # Convert x and y coordinates to the true scale
-        maps = []
-        historical_adjacent_no_e[:, :, 0] = historical_adjacent_no_e[:, :, 0] * backgrond_img.shape[1]
-        historical_adjacent_no_e[:, :, 1] = historical_adjacent_no_e[:, :, 1] * backgrond_img.shape[0]
-
-        # iterate through time axis
-        for i in range(self.history_length + 1):
-            # deepcopy background image
-            map = deepcopy(backgrond_img)
-            # Draw all adjacent tracks on the map
-            for track in historical_adjacent_no_e[:, i, :]:
-                map = draw_circle(track, (255, 255, 0), map)
-
-            maps.append(cv2.resize(map, (224, 224), interpolation=cv2.INTER_AREA))
-
-        maps_with_adjacent_vehicles = np.array(maps, dtype=np.float32)
-
         # Visual representation of the map
-        map_resized = cv2.resize(self.background_images[scene_id], (224, 224), interpolation=cv2.INTER_AREA)
+        # Visual representation of the map
+        map_resized = cv2.resize(gt_background_img, (224, 224), interpolation=cv2.INTER_AREA)
         hidden_cells_resized = cv2.resize(blank_img, (224, 224), interpolation=cv2.INTER_AREA)
 
         # Normalize map and hiddden_cells_resized
@@ -385,7 +373,7 @@ class OGMDataset(Dataset):
         seq_mask = np.all(historical_adjacent_no_e == 0, axis=-1)  # Create a sequence mask where all features are zeros
 
         input = {
-            "historical_adjacent_obs": historical_adjacent_no_e,
+            "historical_adjacent_obs": historical_adjacent_no_e[:, :, :3],
             "historical_ego_obs": np.array(historical_ego_obs, dtype=np.float32),
             "map_obs": map_resized.astype(np.float32),
             "ogm": ogm.astype(np.float32),
@@ -394,7 +382,6 @@ class OGMDataset(Dataset):
             "hidden_ogm_cells": hidden_ogm_cells[:, :-1],
             "hidden_cells_resized": hidden_cells_resized.astype(np.float32),
             "seq_mask": seq_mask,
-            "maps_with_adjacent_vehicles": maps_with_adjacent_vehicles,
         }
         target = hidden_ogm_cells[:, -1:].astype(np.float32)
 

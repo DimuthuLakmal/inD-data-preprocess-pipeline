@@ -33,7 +33,7 @@ class VehicleTemporalEncoder(nn.Module):
       h_seq     : [B, N1, T, d_model]  (per-vehicle sequence embeddings)
       h_cls     : [B, N1, d_model]     (optional; only if return_cls=True)
     """
-    def __init__(self, d_in, d_model=128, nhead=4, num_layers=2, dropout=0.1, use_cls=False):
+    def __init__(self, d_in, d_model=128, d_out=128, nhead=4, num_layers=2, dropout=0.1, use_cls=False):
         super().__init__()
         self.use_cls = use_cls
 
@@ -49,6 +49,7 @@ class VehicleTemporalEncoder(nn.Module):
 
         self.ln_tok = nn.LayerNorm(d_model)
         self.temp_pool = TemporalAttnPool(d_model)
+        self.ln_out = nn.Linear(d_model, d_out)
 
     def forward(self, x, time_pad, veh_pad=None):
         """
@@ -56,11 +57,14 @@ class VehicleTemporalEncoder(nn.Module):
         return_cls: if True and use_cls=True, also returns per-vehicle CLS summary
         """
         B, N1, T, _ = x.shape
-        assert time_pad.shape == (B, N1, T)
+        # assert time_pad.shape == (B, N1, T)
 
         # per-vehicle temporal encoding (no mixing between vehicles)
         x = self.proj_in(x).view(B * N1, T, -1)          # [B*N1, T, D]
-        pad_t = time_pad.view(B * N1, T)                 # [B*N1, T], True=pad
+        
+        pad_t = None
+        if time_pad is not None:
+            pad_t = time_pad.view(B * N1, T)                 # [B*N1, T], True=pad
 
         x = self.posenc(x)                             # [B*N1, T, D]
         h = self.encoder(x, src_key_padding_mask=pad_t)# [B*N1, T, D]
@@ -73,4 +77,5 @@ class VehicleTemporalEncoder(nn.Module):
 
         h_seq = torch.nan_to_num(h_seq, nan=0.0)
         h_seq = self.temp_pool(h_seq, time_pad)  # [B, N1, D]
+        h_seq = self.ln_out(h_seq)
         return h_seq

@@ -18,7 +18,8 @@ class TemporalAttnPool(nn.Module):
         scores = self.phi(H)                         # [B,N,T,1]
         scores = scores.squeeze(-1)                  # [B,N,T]
         # mask: -inf where invalid
-        scores = scores.masked_fill(seq_pad, float('-inf'))
+        if seq_pad is not None:
+            scores = scores.masked_fill(seq_pad, float('-inf'))
         alpha  = torch.softmax(scores, dim=-1)       # [B,N,T]
         alpha  = torch.nan_to_num(alpha, nan=0.0)    # in case all masked
         P = torch.einsum('bnt,bntf->bnf', alpha, H)  # [B,N,F]

@@ -7,6 +7,7 @@ import yaml
 from dataset.data_loader import OGMDataLoader
 from models.spatio_temporal_encoder import SGATTransformer
 import torch.nn as nn
+import cv2
 
 from validate import evaluate
 
@@ -66,7 +67,8 @@ def train(model, train_data_loader, valid_data_loader, config):
             mask_fixed_blocks = (targets != 3).squeeze(-1)  # Cells occupied with fixed blocks are marked with a 3 in the target
             mask = mask * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not padded
 
-            outputs = model(inputs).squeeze(-1)
+            outputs, gates = model(inputs)
+            outputs = outputs.squeeze(-1)
             outputs_sig = nn.Sigmoid()(outputs)
 
             # Calculate the binary cross-entropy loss
@@ -91,12 +93,6 @@ def train(model, train_data_loader, valid_data_loader, config):
                 logging.info(
                     f'Train Epoch {epoch}, Batch {batch_idx}, Loss: {loss_avg.item()}, Accuracy: {accuracy.item()}')
 
-                connections = 0
-                for edge_weight in inputs['edge_weights']:
-                    connections += edge_weight.shape[0]
-
-                print(
-                    'Connections: {}, avg nodes: {}'.format(connections, (connections / torch.sum(mask.int())).item()))
 
         train_loss = total_loss / batch_itr
 

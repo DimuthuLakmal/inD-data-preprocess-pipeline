@@ -20,7 +20,7 @@ class SGATTransformer(nn.Module):
 
         te_configs = configs['temporal_encoder']
         te_configs['device'] = self.device
-        self.temporal_encoder = VehicleTemporalEncoder(3, 16, nhead=4, num_layers=4, dropout=0.1)
+        self.temporal_encoder = VehicleTemporalEncoder(3, 32, 16, nhead=4, num_layers=4, dropout=0.1)
 
         gat_configs = configs['gat']
         self.gat_layer = GATLayer(gat_configs)
@@ -43,7 +43,7 @@ class SGATTransformer(nn.Module):
         veh_feat = x['historical_adjacent_obs']
         map_img = x['map_obs']
 
-        x_te = self.temporal_encoder(veh_feat, seq_mask, vehicle_mask)
+        x_te = self.temporal_encoder(veh_feat, None, None)
         gat_out = self.gat_layer(x_te, cell_feat, x['edge_weights'], x['edge_index'])
 
         # unet_out = self.unet(x)
@@ -52,6 +52,6 @@ class SGATTransformer(nn.Module):
 
         h_fused, gates = self.fusion(gat_out.squeeze(1), map_output)
 
-        out_fc = self.fc_out(h_fused).unsqueeze(-1)
+        out_fc = self.fc_out(gat_out.squeeze(1)).unsqueeze(-1)
 
-        return out_fc
+        return out_fc, gates

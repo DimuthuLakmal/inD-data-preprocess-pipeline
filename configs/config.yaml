@@ -1,8 +1,8 @@
 # Model Configs
 model:
   lr: 0.0001 # learning rate
-  use_lr_scheduler: True # if you want to use learning rate scheduler
-  train_batch_size: 8
+  use_lr_scheduler: False # if you want to use learning rate scheduler
+  train_batch_size: 4
   test_batch_size: 16
   train_epochs: 100
   model_output_path: "results/checkpoints/epoch_{}.pt"

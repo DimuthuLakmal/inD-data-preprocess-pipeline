@@ -3,6 +3,7 @@ import logging
 
 import torch
 import torch.nn as nn
+import cv2
 
 
 def evaluate(model, valid_data_loader, device):
@@ -25,11 +26,11 @@ def evaluate(model, valid_data_loader, device):
 
             mask = inputs['mask']  # Mask indicates the non-padded cells (1: valid, 0: padded)
             # Masking is applied to ignore unwanted cells
-            mask_fixed_blocks = (targets != 3).squeeze(
-                -1)  # Cells occupied with fixed blocks are marked with a 3 in the target
+            mask_fixed_blocks = (targets != 3).squeeze(-1)  # Cells occupied with fixed blocks are marked with a 3 in the target
             mask = mask * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not padded
 
-            outputs = model(inputs).squeeze(-1)
+            outputs, gates = model(inputs)
+            outputs = outputs.squeeze(-1)
             outputs_sig = nn.Sigmoid()(outputs)
 
             # Calculate the binary cross-entropy loss
@@ -38,24 +39,20 @@ def evaluate(model, valid_data_loader, device):
 
             loss_aggregated = loss_fn_aggregated(outputs, targets)
             loss_aggregated = loss_aggregated * mask
+            scene_wise_loss = list(loss_aggregated[:,0].detach().cpu().numpy())
+            scene_wise_gates = list(gates[:,0].detach().cpu().numpy())
+
             loss_aggregated = loss_aggregated.sum() / (mask.sum().clamp_min(1))
             accuracy = (outputs_sig.round() == targets).float().mean()
 
             total_loss += loss_aggregated.item()
             batch_itr += 1
 
-            if batch_idx % 10 == 0:  # Log every 10 batches
-                print(
-                    f'Batch {batch_idx}, Loss: {loss_aggregated.item()}, Items: {torch.sum(mask.int())}')
-                logging.info(
-                    f'Batch {batch_idx}, Loss: {loss_aggregated.item()}, Accuracy: {accuracy.item()}')
-
-                connections = 0
-                for edge_weight in inputs['edge_weights']:
-                    connections += edge_weight.shape[0]
-
-                print(
-                    'Connections: {}, avg nodes: {}'.format(connections, (connections / torch.sum(mask.int())).item()))
+            scene_data = [(arr[0], scene_loss) for (arr, scene_loss) in zip(list(inputs["scene_id"].detach().cpu().numpy()), scene_wise_loss)]
+        
+            print(f'Batch {batch_idx}, Loss: {loss_aggregated.item()}, Items: {torch.sum(mask.int())}, Scenes: {scene_data}')
+            # print(f'Batch {batch_idx}, Loss: {loss_aggregated.item()}')
+            logging.info(f'Batch {batch_idx}, Loss: {loss_aggregated.item()}, Accuracy: {accuracy.item()}')
 
         valid_loss = total_loss / batch_itr
 

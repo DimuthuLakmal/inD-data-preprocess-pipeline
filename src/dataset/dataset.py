@@ -75,10 +75,33 @@ class OGMDataset(Dataset):
 
             # load json files from annotations path
             annotation_files = [f for f in os.listdir(self.annotations_path) if f.endswith('.json')]
+            
             label_dict = {}
+
+            # Creating a balanced dataset
+            # First find out training data with positive cells
+            files_with_positive_cells = []
             for file in annotation_files:
                 key = file.split('.')[0]
                 scene_id = int(key.split('_')[0])
+                with open(os.path.join(self.annotations_path, file), 'r') as f:
+                    data = json.load(f)
+                    normalised_data = []
+                    hidden_ogm_cells_xys = []
+                    for cell in data:
+                        if cell['label'] == 1:
+                            files_with_positive_cells.append(key)
+                            break
+
+            
+            random_positive_keys = np.random.choice(files_with_positive_cells, min(int(len(annotation_files)/2), len(files_with_positive_cells)), replace=False)
+
+            for file in annotation_files:
+                key = file.split('.')[0]
+                scene_id = int(key.split('_')[0])
+                if scene_id != 18 and scene_id != 19:
+                    continue
+                    
                 with open(os.path.join(self.annotations_path, file), 'r') as f:
                     data = json.load(f)
                     normalised_data = []
@@ -104,7 +127,17 @@ class OGMDataset(Dataset):
                 data_dict = self.data_dict[key]
                 ogm_cells, ogm_cells_xys = label_dict[key]
 
-                random_index = random.randint(0, len(label_dict[key][0]) - 1)
+                if key in random_positive_keys:
+                    positive_indices = []
+                    for i, cell in enumerate(ogm_cells):
+                        if cell[2] == 1:
+                            positive_indices.append(i)
+                    
+                    random_index = random.choice(positive_indices)
+
+                else:
+                    random_index = random.randint(0, len(label_dict[key][0]) - 1)
+
                 ogm_cells = [ogm_cells[random_index]]
                 ogm_cells_xys = [ogm_cells_xys[random_index]]
 
@@ -363,6 +396,19 @@ class OGMDataset(Dataset):
         map_resized = cv2.resize(gt_background_img, (224, 224), interpolation=cv2.INTER_AREA)
         hidden_cells_resized = cv2.resize(blank_img, (224, 224), interpolation=cv2.INTER_AREA)
 
+        seq_mask = np.all(historical_adjacent_no_e == 0, axis=-1)  # Create a sequence mask where all features are zeros
+
+        # Fixing a class type issue (0 is used to represent car type. Replacing 0 with 4)
+        veh_type = historical_adjacent_no_e[..., 7]                                       # (B, N, T)
+        mask = (veh_type == 0) & (~seq_mask)
+        veh_type[mask] = 4
+        historical_adjacent_no_e[..., 7] = veh_type
+
+        # Attaching scene_id as a feature
+        scene_id_norm = scene_id / 10 # will be divided it further later to bring the range of 0 and 1
+        scene_id_arr = np.full(historical_adjacent_no_e.shape[:-1] + (1,), scene_id_norm, dtype=historical_adjacent_no_e.dtype)  # (B, N, T, 1)
+        historical_adjacent_no_e = np.concatenate([historical_adjacent_no_e, scene_id_arr], axis=-1) 
+
         # Normalize map and hiddden_cells_resized
         map_resized = map_resized / 255.0  # Normalize to [0, 1]
         hidden_cells_resized = hidden_cells_resized / 255.0  # Normalize to [0, 1]
@@ -370,10 +416,11 @@ class OGMDataset(Dataset):
         historical_adjacent_no_e[:, :, 2:3] = historical_adjacent_no_e[:, :,
                                               2:3] / 360.0  # Normalize heading to [0, 1]. This is a mistake done when extracting the data
         historical_adjacent_no_e[:, :, 3:] = historical_adjacent_no_e[:, :, 3:] / 10.0
-        seq_mask = np.all(historical_adjacent_no_e == 0, axis=-1)  # Create a sequence mask where all features are zeros
+
+        historical_adjacent_input = np.concatenate((historical_adjacent_no_e[:, :, :2], historical_adjacent_no_e[:, :, 9:10]), axis=-1)
 
         input = {
-            "historical_adjacent_obs": historical_adjacent_no_e[:, :, :3],
+            "historical_adjacent_obs": historical_adjacent_input[:, :, :3],
             "historical_ego_obs": np.array(historical_ego_obs, dtype=np.float32),
             "map_obs": map_resized.astype(np.float32),
             "ogm": ogm.astype(np.float32),
@@ -382,6 +429,7 @@ class OGMDataset(Dataset):
             "hidden_ogm_cells": hidden_ogm_cells[:, :-1],
             "hidden_cells_resized": hidden_cells_resized.astype(np.float32),
             "seq_mask": seq_mask,
+            "scene_id": np.array([scene_id], np.float32)
         }
         target = hidden_ogm_cells[:, -1:].astype(np.float32)
 

@@ -99,8 +99,8 @@ class OGMDataset(Dataset):
             for file in annotation_files:
                 key = file.split('.')[0]
                 scene_id = int(key.split('_')[0])
-                if scene_id != 18 and scene_id != 19:
-                    continue
+                # if scene_id != 18 and scene_id != 19:
+                #     continue
                     
                 with open(os.path.join(self.annotations_path, file), 'r') as f:
                     data = json.load(f)
@@ -387,7 +387,6 @@ class OGMDataset(Dataset):
             cv2.fillPoly(gt_background_img, [np.array(cel).astype(np.int32)], (0, 102, 204))
 
         historical_adjacent_obs = np.array(list(historical_adjacent_obs.values()), dtype=np.float32)
-        historical_adjacent_no_e = historical_adjacent_obs[:, :, :-1]
 
         hidden_ogm_cells = np.array(data_dict["hidden_ogm_cells"], dtype=np.float32)
 
@@ -396,31 +395,30 @@ class OGMDataset(Dataset):
         map_resized = cv2.resize(gt_background_img, (224, 224), interpolation=cv2.INTER_AREA)
         hidden_cells_resized = cv2.resize(blank_img, (224, 224), interpolation=cv2.INTER_AREA)
 
-        seq_mask = np.all(historical_adjacent_no_e == 0, axis=-1)  # Create a sequence mask where all features are zeros
+        seq_mask = np.all(historical_adjacent_obs == 0, axis=-1)  # Create a sequence mask where all features are zeros
 
         # Fixing a class type issue (0 is used to represent car type. Replacing 0 with 4)
-        veh_type = historical_adjacent_no_e[..., 7]                                       # (B, N, T)
+        veh_type = historical_adjacent_obs[..., 7]  # (B, N, T)
         mask = (veh_type == 0) & (~seq_mask)
         veh_type[mask] = 4
-        historical_adjacent_no_e[..., 7] = veh_type
+        historical_adjacent_obs[..., 7] = veh_type
 
         # Attaching scene_id as a feature
-        scene_id_norm = scene_id / 10 # will be divided it further later to bring the range of 0 and 1
-        scene_id_arr = np.full(historical_adjacent_no_e.shape[:-1] + (1,), scene_id_norm, dtype=historical_adjacent_no_e.dtype)  # (B, N, T, 1)
-        historical_adjacent_no_e = np.concatenate([historical_adjacent_no_e, scene_id_arr], axis=-1) 
+        scene_id_norm = scene_id / 10  # will be divided it further later to bring the range of 0 and 1
+        scene_id_arr = np.full(historical_adjacent_obs.shape[:-1] + (1,), scene_id_norm,
+                               dtype=historical_adjacent_obs.dtype)  # (B, N, T, 1)
+        historical_adjacent_obs = np.concatenate([historical_adjacent_obs, scene_id_arr], axis=-1)
 
-        # Normalize map and hiddden_cells_resized
-        map_resized = map_resized / 255.0  # Normalize to [0, 1]
-        hidden_cells_resized = hidden_cells_resized / 255.0  # Normalize to [0, 1]
+        historical_adjacent_obs[:, :, 2:3] = historical_adjacent_obs[:, :,
+                                             2:3] / 360.0  # Normalize heading to [0, 1]. This is a mistake done when extracting the data
+        historical_adjacent_obs[:, :, 3:] = historical_adjacent_obs[:, :, 3:] / 10.0
 
-        historical_adjacent_no_e[:, :, 2:3] = historical_adjacent_no_e[:, :,
-                                              2:3] / 360.0  # Normalize heading to [0, 1]. This is a mistake done when extracting the data
-        historical_adjacent_no_e[:, :, 3:] = historical_adjacent_no_e[:, :, 3:] / 10.0
-
-        historical_adjacent_input = np.concatenate((historical_adjacent_no_e[:, :, :2], historical_adjacent_no_e[:, :, 9:10]), axis=-1)
+        historical_adjacent_input = np.concatenate((historical_adjacent_obs[:, :, :3],
+                                                    historical_adjacent_obs[:, :, 7:8],
+                                                    historical_adjacent_obs[:, :, 10:11]), axis=-1)
 
         input = {
-            "historical_adjacent_obs": historical_adjacent_input[:, :, :3],
+            "historical_adjacent_obs": historical_adjacent_input,
             "historical_ego_obs": np.array(historical_ego_obs, dtype=np.float32),
             "map_obs": map_resized.astype(np.float32),
             "ogm": ogm.astype(np.float32),

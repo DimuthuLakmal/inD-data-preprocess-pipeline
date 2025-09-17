@@ -61,19 +61,20 @@ def train(model, train_data_loader, valid_data_loader, config):
                 if k != 'edge_index' and k != 'edge_weights':
                     inputs[k] = v.to(config['model']["device"])
 
-            mask = inputs['mask']  # Mask indicates the non-padded cells (1: valid, 0: padded)
+            mask = inputs['mask'].squeeze()  # Mask indicates the non-padded cells (1: valid, 0: padded)
             # Masking is applied to ignore unwanted cells
-
-            mask_fixed_blocks = (targets != 3).squeeze(-1)  # Cells occupied with fixed blocks are marked with a 3 in the target
+            mask_fixed_blocks = (
+                        targets != 3).squeeze()  # Cells occupied with fixed blocks are marked with a 3 in the target
             mask = mask * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not padded
 
-            outputs, gates = model(inputs)
-            outputs = outputs.squeeze(-1)
+            outputs, _ = model(inputs)
+            outputs = outputs.squeeze()
             outputs_sig = nn.Sigmoid()(outputs)
 
             # Calculate the binary cross-entropy loss
-            targets = targets.squeeze(-1) * mask
+            targets = targets.squeeze() * mask
             outputs = outputs * mask  # Apply mask to outputs
+            outputs_sig = outputs_sig * mask  # Apply mask to outputs
 
             loss_aggregated = loss_fn_aggregated(outputs, targets)
             loss_aggregated = loss_aggregated * mask
@@ -88,10 +89,8 @@ def train(model, train_data_loader, valid_data_loader, config):
             optimizer.step()
 
             if batch_idx % 10 == 0:  # Log every 10 batches
-                print(
-                    f'Train Epoch {epoch}, Batch {batch_idx}, Loss: {loss_avg.item()}, Items: {torch.sum(mask.int())}')
-                logging.info(
-                    f'Train Epoch {epoch}, Batch {batch_idx}, Loss: {loss_avg.item()}, Accuracy: {accuracy.item()}')
+                print(f'Train Epoch {epoch}, Batch {batch_idx}, Loss: {loss_avg.item()}, Items: {torch.sum(mask.int())}')
+                logging.info(f'Train Epoch {epoch}, Batch {batch_idx}, Loss: {loss_avg.item()}, Accuracy: {accuracy.item()}')
 
 
         train_loss = total_loss / batch_itr

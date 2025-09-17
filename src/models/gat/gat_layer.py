@@ -1,8 +1,8 @@
 import torch
 from torch import nn
 
-from models.gat.gat import GATv2Conv
-from models.transformer.cell_query_emb import CellQueryEmb
+from src.models.gat.gat import GATv2Conv
+from src.models.transformer.cell_query_emb import CellQueryEmb
 
 
 class GATLayer(nn.Module):

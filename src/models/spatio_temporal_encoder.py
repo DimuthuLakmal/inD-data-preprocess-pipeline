@@ -1,11 +1,11 @@
 import torch
 from torch import nn
 
-from models.gat.gat_layer import GATLayer
-from models.transformer.expert_gating import GatedFusion
-from models.transformer.graph_weight_encoder import GraphWeightEncoder
-from models.transformer.vehicle_temporal_encoder import VehicleTemporalEncoder
-from models.vision.base_models import FrameEncoder
+from src.models.gat.gat_layer import GATLayer
+from src.models.transformer.expert_gating import GatedFusion
+from src.models.transformer.graph_weight_encoder import GraphWeightEncoder
+from src.models.transformer.vehicle_temporal_encoder import VehicleTemporalEncoder
+from src.models.vision.base_models import FrameEncoder
 
 
 class SGATTransformer(nn.Module):
@@ -20,7 +20,7 @@ class SGATTransformer(nn.Module):
 
         te_configs = configs['temporal_encoder']
         te_configs['device'] = self.device
-        self.temporal_encoder = VehicleTemporalEncoder(3, 32, 16, nhead=4, num_layers=4, dropout=0.1)
+        self.temporal_encoder = VehicleTemporalEncoder(5, 16, nhead=4, num_layers=2, dropout=0.1)
 
         gat_configs = configs['gat']
         self.gat_layer = GATLayer(gat_configs)
@@ -43,7 +43,7 @@ class SGATTransformer(nn.Module):
         veh_feat = x['historical_adjacent_obs']
         map_img = x['map_obs']
 
-        x_te = self.temporal_encoder(veh_feat, None, None)
+        x_te = self.temporal_encoder(veh_feat, seq_mask, vehicle_mask)
         gat_out = self.gat_layer(x_te, cell_feat, x['edge_weights'], x['edge_index'])
 
         # unet_out = self.unet(x)

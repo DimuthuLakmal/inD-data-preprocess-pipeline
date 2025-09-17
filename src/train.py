@@ -39,8 +39,6 @@ def train(model, data_loader, config):
         lambda1 = lambda epoch: 0.9 ** epoch
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
 
-    first_batch = True
-
     for epoch in range(config['model']['train_epochs']):  # Example: 10 epochs
         for batch_idx, (inputs, target) in enumerate(data_loader):
 
@@ -50,7 +48,7 @@ def train(model, data_loader, config):
                 if k != 'edge_index' and k != 'edge_weights':
                     inputs[k] = v.to(config['model']["device"])
 
-            mask = inputs['mask']  # Mask indicates the non-padded cells (1: valid, 0: padded)
+            mask = inputs['mask'].squeeze()  # Mask indicates the non-padded cells (1: valid, 0: padded)
             # Masking is applied to ignore unwanted cells
             mask_fixed_blocks = (targets != 3).squeeze()  # Cells occupied with fixed blocks are marked with a 3 in the target
             mask = mask * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not padded
@@ -60,7 +58,7 @@ def train(model, data_loader, config):
             cell_feat = inputs['hidden_ogm_cells']
             veh_feat = inputs['historical_adjacent_obs']
             map = inputs['map_obs']
-            outputs = model(veh_feat, cell_feat, seq_mask, mask, vehicle_mask, map).squeeze()
+            outputs = model(veh_feat, cell_feat, seq_mask, mask.unsqueeze(-1), vehicle_mask, map).squeeze()
             outputs_sig = nn.Sigmoid()(outputs)
 
             # Calculate the binary cross-entropy loss
@@ -71,7 +69,7 @@ def train(model, data_loader, config):
             loss_aggregated = loss_fn_aggregated(outputs, targets)
             loss_aggregated = loss_aggregated * mask
             loss_aggregated = loss_aggregated.sum() / (mask.sum().clamp_min(1))
-            loss = loss_fn(outputs_sig.view(-1), targets.view(-1))
+            # loss = loss_fn(outputs_sig.view(-1), targets.view(-1))
 
             optimizer.zero_grad()
             loss_aggregated.backward()

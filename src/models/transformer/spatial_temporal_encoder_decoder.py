@@ -288,7 +288,7 @@ class CellQueryEncoder(nn.Module):
 class CellFromVehicleAndMap(nn.Module):
     def __init__(self):
         super().__init__()
-        self.cells_from_vehicles = CellsFromVehicles(d_vehicle_in=3, q_dim=16, d_model=64, nhead=4, Lenc=4, Ldec=4)
+        self.cells_from_vehicles = CellsFromVehicles(d_vehicle_in=5, q_dim=16, d_model=64, nhead=4, Lenc=4, Ldec=4)
         self.image_encoder = FrameEncoder(d_model=256, pretrained=False, global_pool='avg')
         self.fusion = GatedFusion(d_veh=16, d_img=256, q_dim=16, use_cell_in_gate=False)
         self.query_encoder = CellQueryEncoder(d_model=16, d_pos=2)
@@ -310,10 +310,10 @@ class CellFromVehicleAndMap(nn.Module):
         # h_img = self.sample_cells_from_feat(h_img, cell_feats)  # [B, N2, D]
         # Q_cell = self.query_encoder(cell_feats, cell_valid=cell_mask)  # [B,N2,D]
         #
-        H_fused, gates = self.fusion(None, h_veh, h_img)
-        logits = self.head(H_fused)  # [B,N2,1]
+        # H_fused, gates = self.fusion(None, h_veh, h_img)
+        logits = self.head(h_veh)  # [B,N2,1]
 
-        return h_veh
+        return logits
 
     def sample_cells_from_feat(self, feat_map, cell_xy_norm):
         """

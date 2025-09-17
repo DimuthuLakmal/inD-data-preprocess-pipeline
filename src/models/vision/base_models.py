@@ -19,7 +19,7 @@ class FrameEncoder(nn.Module):
     Input : imgs [B, T, 3, H, W]
     Output: emb  [B, T, D]
     """
-    def __init__(self, d_model=256, pretrained=True, global_pool='avg'):
+    def __init__(self, d_model=256, pretrained=True, global_pool='avg', p_spatial_dropout=0.3, p_embed_dropout=0.3):
         super().__init__()
         m = resnet50(weights="DEFAULT" if pretrained else None)
 
@@ -30,13 +30,19 @@ class FrameEncoder(nn.Module):
         )
         c5 = 2048
 
+        self.spatial_drop = nn.Dropout2d(p_spatial_dropout)
+
         # Project to d_model after global pooling
         self.global_pool = global_pool
         self.proj = nn.Linear(c5, d_model)
+        self.ln = nn.LayerNorm(d_model)
+        self.embed_drop = nn.Dropout(p_embed_dropout)
 
-    def forward(self, imgs):  # [B, T, 3, H, W]
+    def forward(self, imgs):  # [B, 3, H, W]
         x = imgs      # [B, 3, H, W]
         f = self.backbone(x)
+
+        f = self.spatial_drop(f)
 
         if self.global_pool == 'avg':
             f = F.adaptive_avg_pool2d(f, 1).squeeze(-1).squeeze(-1)   # [B*T, 2048]
@@ -46,6 +52,8 @@ class FrameEncoder(nn.Module):
             raise ValueError("global_pool must be 'avg' or 'max'")
 
         emb = self.proj(f)
+        emb = self.ln(emb)
+        emb = self.embed_drop(emb)
         return emb
 
 class SpatialSoftmax(nn.Module):

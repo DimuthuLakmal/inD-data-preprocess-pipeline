@@ -44,14 +44,14 @@ class SGATTransformer(nn.Module):
         map_img = x['map_obs']
 
         x_te = self.temporal_encoder(veh_feat, seq_mask, vehicle_mask)
-        gat_out = self.gat_layer(x_te, cell_feat, x['edge_weights'], x['edge_index'])
+        gat_out = self.gat_layer(x_te, cell_feat, x['edge_weights'], x['edge_index']).squeeze(1)
 
         # unet_out = self.unet(x)
         map_inputs = map_img.permute(0, 3, 1, 2)
         map_output = self.map_encoder(map_inputs)
 
-        h_fused, gates = self.fusion(gat_out.squeeze(1), map_output)
+        h_fused, gates = self.fusion(gat_out, map_output)
 
-        out_fc = self.fc_out(gat_out.squeeze(1)).unsqueeze(-1)
+        out_fc = self.fc_out(h_fused)
 
         return out_fc, gates

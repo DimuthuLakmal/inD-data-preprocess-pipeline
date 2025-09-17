@@ -24,35 +24,35 @@ def evaluate(model, valid_data_loader, device):
                 if k != 'edge_index' and k != 'edge_weights':
                     inputs[k] = v.to(device)
 
-            mask = inputs['mask']  # Mask indicates the non-padded cells (1: valid, 0: padded)
+            mask = inputs['mask'].squeeze()  # Mask indicates the non-padded cells (1: valid, 0: padded)
             # Masking is applied to ignore unwanted cells
-            mask_fixed_blocks = (targets != 3).squeeze(-1)  # Cells occupied with fixed blocks are marked with a 3 in the target
+            mask_fixed_blocks = (
+                    targets != 3).squeeze()  # Cells occupied with fixed blocks are marked with a 3 in the target
             mask = mask * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not padded
 
             outputs, gates = model(inputs)
-            outputs = outputs.squeeze(-1)
+            outputs = outputs.squeeze()
             outputs_sig = nn.Sigmoid()(outputs)
 
             # Calculate the binary cross-entropy loss
-            targets = targets.squeeze(-1) * mask
+            targets = targets.squeeze() * mask
             outputs = outputs * mask  # Apply mask to outputs
+            outputs_sig = outputs_sig * mask  # Apply mask to outputs
 
             loss_aggregated = loss_fn_aggregated(outputs, targets)
             loss_aggregated = loss_aggregated * mask
-            scene_wise_loss = list(loss_aggregated[:,0].detach().cpu().numpy())
-            scene_wise_gates = list(gates[:,0].detach().cpu().numpy())
-
-            loss_aggregated = loss_aggregated.sum() / (mask.sum().clamp_min(1))
+            scene_wise_loss = list(loss_aggregated.detach().cpu().numpy())
+            loss_avg = loss_aggregated.sum() / (mask.sum().clamp_min(1))
             accuracy = (outputs_sig.round() == targets).float().mean()
 
-            total_loss += loss_aggregated.item()
+            total_loss += loss_avg.item()
             batch_itr += 1
 
             scene_data = [(arr[0], scene_loss) for (arr, scene_loss) in zip(list(inputs["scene_id"].detach().cpu().numpy()), scene_wise_loss)]
         
-            print(f'Batch {batch_idx}, Loss: {loss_aggregated.item()}, Items: {torch.sum(mask.int())}, Scenes: {scene_data}')
+            print(f'Batch {batch_idx}, Loss: {loss_avg.item()}, Items: {torch.sum(mask.int())}, Scenes: {scene_data}')
             # print(f'Batch {batch_idx}, Loss: {loss_aggregated.item()}')
-            logging.info(f'Batch {batch_idx}, Loss: {loss_aggregated.item()}, Accuracy: {accuracy.item()}')
+            logging.info(f'Batch {batch_idx}, Loss: {loss_avg.item()}, Accuracy: {accuracy.item()}')
 
         valid_loss = total_loss / batch_itr
 

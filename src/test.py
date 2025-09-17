@@ -28,14 +28,14 @@ def create_args():
 
 
 if __name__ == '__main__':
-    with open("configs/config.yaml", "r") as stream:
+    with open("../configs/config.yaml", "r") as stream:
         config = yaml.safe_load(stream)
         config['data']['batch_size'] = config['model']['test_batch_size']
 
     valid_dataloader = OGMDataLoader(config['data'], phase='validation').create_dataloader()
 
     model = SGATTransformer(config['model']).to(config['model']["device"])
-    model.load_state_dict(torch.load(config['model']['model_output_path'].format(13)))
+    model.load_state_dict(torch.load(config['model']['model_output_path'].format(56)))
     model = model.to(config['model']["device"])
 
     test_loss = evaluate(model, valid_dataloader, config['model']["device"])

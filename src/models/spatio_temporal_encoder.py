@@ -20,16 +20,16 @@ class SGATTransformer(nn.Module):
 
         te_configs = configs['temporal_encoder']
         te_configs['device'] = self.device
-        self.temporal_encoder = VehicleTemporalEncoder(5, 16, nhead=4, num_layers=2, dropout=0.1)
+        self.temporal_encoder = VehicleTemporalEncoder(10, 32, nhead=4, num_layers=2, dropout=0.1)
 
         gat_configs = configs['gat']
         self.gat_layer = GATLayer(gat_configs)
 
         self.map_encoder = FrameEncoder(d_model=256, pretrained=True, global_pool='avg')
 
-        self.fusion = GatedFusion(d_veh=16, d_img=256, q_dim=16, use_cell_in_gate=False)
+        self.fusion = GatedFusion(d_veh=32, d_img=256, q_dim=32, use_cell_in_gate=False)
 
-        self.fc_out = nn.Linear(16, 1)
+        self.fc_out = nn.Linear(32, 1)
 
     def reset_parameters(self):
         """Reset parameters of the model."""
@@ -44,7 +44,8 @@ class SGATTransformer(nn.Module):
         map_img = x['map_obs']
 
         x_te = self.temporal_encoder(veh_feat, seq_mask, vehicle_mask)
-        gat_out = self.gat_layer(x_te, cell_feat, x['edge_weights'], x['edge_index']).squeeze(1)
+        gat_out, l2_loss = self.gat_layer(x_te, cell_feat, x['edge_weights'], x['edge_index'])
+        gat_out = gat_out.squeeze(1)
 
         # unet_out = self.unet(x)
         map_inputs = map_img.permute(0, 3, 1, 2)
@@ -54,4 +55,4 @@ class SGATTransformer(nn.Module):
 
         out_fc = self.fc_out(gat_out)
 
-        return out_fc, gates
+        return out_fc, gates, l2_loss

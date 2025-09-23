@@ -30,7 +30,7 @@ def evaluate(model, valid_data_loader, device):
                     targets != 3).squeeze()  # Cells occupied with fixed blocks are marked with a 3 in the target
             mask = mask * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not padded
 
-            outputs, gates = model(inputs)
+            outputs, gates, l2_loss = model(inputs)
             outputs = outputs.squeeze()
             outputs_sig = nn.Sigmoid()(outputs)
 

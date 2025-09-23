@@ -141,14 +141,15 @@ class MessagePassing(torch.nn.Module):
         self.inspector.inspect_signature(self.aggregate, exclude=[0, 'aggr'])
         self.inspector.inspect_signature(self.message_and_aggregate, [0])
         self.inspector.inspect_signature(self.update, exclude=[0])
-        self.inspector.inspect_signature(self.edge_update)
+        self.inspector.inspect_signature(self.edge_update_z)
+        self.inspector.inspect_signature(self.edge_update_alpha)
 
         self._user_args: List[str] = self.inspector.get_flat_param_names(
             ['message', 'aggregate', 'update'], exclude=self.special_args)
         self._fused_user_args: List[str] = self.inspector.get_flat_param_names(
             ['message_and_aggregate', 'update'], exclude=self.special_args)
         self._edge_user_args: List[str] = self.inspector.get_param_names(
-            'edge_update', exclude=self.special_args)
+            'edge_update_alpha', exclude=self.special_args)
 
         # Support for "fused" message passing:
         self.fuse = self.inspector.implements('message_and_aggregate')
@@ -653,9 +654,14 @@ class MessagePassing(torch.nn.Module):
         coll_dict = self._collect(self._edge_user_args, edge_index,
                                   mutable_size, kwargs)
 
-        edge_kwargs = self.inspector.collect_param_data(
-            'edge_update', coll_dict)
-        out = self.edge_update(**edge_kwargs)
+        if kwargs.get('func') == 'edge_update_alpha':
+            edge_kwargs = self.inspector.collect_param_data(
+                'edge_update_alpha', coll_dict)
+            out = self.edge_update_alpha(**edge_kwargs)
+        elif kwargs.get('func') == 'edge_update_z':
+            edge_kwargs = self.inspector.collect_param_data(
+                'edge_update_z', coll_dict)
+            out = self.edge_update_z(**edge_kwargs)
 
         for hook in self._edge_update_forward_hooks.values():
             res = hook(self, (edge_index, size, kwargs), out)
@@ -665,7 +671,7 @@ class MessagePassing(torch.nn.Module):
         return out
 
     @abstractmethod
-    def edge_update(self) -> Tensor:
+    def edge_update_alpha(self) -> Tensor:
         r"""Computes or updates features for each edge in the graph.
         This function can take any argument as input which was initially passed
         to :meth:`edge_updater`.
@@ -673,6 +679,9 @@ class MessagePassing(torch.nn.Module):
         the respective nodes :math:`i` and :math:`j` by appending :obj:`_i` or
         :obj:`_j` to the variable name, *.e.g.* :obj:`x_i` and :obj:`x_j`.
         """
+        raise NotImplementedError
+
+    def edge_update_z(self) -> Tensor:
         raise NotImplementedError
 
     # Inference Decomposition #################################################

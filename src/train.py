@@ -67,7 +67,7 @@ def train(model, train_data_loader, valid_data_loader, config):
                         targets != 3).squeeze()  # Cells occupied with fixed blocks are marked with a 3 in the target
             mask = mask * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not padded
 
-            outputs, _ = model(inputs)
+            outputs, _, l2_loss = model(inputs)
             outputs = outputs.squeeze()
             outputs_sig = nn.Sigmoid()(outputs)
 
@@ -85,7 +85,7 @@ def train(model, train_data_loader, valid_data_loader, config):
             batch_itr += 1
 
             optimizer.zero_grad()
-            loss_avg.backward()
+            (loss_avg + l2_loss * 0.1).backward()
             optimizer.step()
 
             if batch_idx % 10 == 0:  # Log every 10 batches
@@ -112,6 +112,7 @@ def train(model, train_data_loader, valid_data_loader, config):
 
         if config['model']['use_lr_scheduler']:
             lr_scheduler.step()
+            print(f'Learning rate adjusted to: {lr_scheduler.get_last_lr()[0]}')
 
     # Save the final model checkpoint
     torch.save(model.state_dict(), config['model']['model_output_path'].format('final'))

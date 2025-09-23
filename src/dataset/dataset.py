@@ -413,8 +413,7 @@ class OGMDataset(Dataset):
                                              2:3] / 360.0  # Normalize heading to [0, 1]. This is a mistake done when extracting the data
         historical_adjacent_obs[:, :, 3:] = historical_adjacent_obs[:, :, 3:] / 10.0
 
-        historical_adjacent_input = np.concatenate((historical_adjacent_obs[:, :, :3],
-                                                    historical_adjacent_obs[:, :, 7:8],
+        historical_adjacent_input = np.concatenate((historical_adjacent_obs[:, :, :9],
                                                     historical_adjacent_obs[:, :, 10:11]), axis=-1)
 
         input = {

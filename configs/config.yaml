@@ -1,10 +1,10 @@
 # Model Configs
 model:
   lr: 0.0001 # learning rate
-  use_lr_scheduler: True # if you want to use learning rate scheduler
+  use_lr_scheduler: False # if you want to use learning rate scheduler
   train_batch_size: 4
   test_batch_size: 8
-  train_epochs: 120
+  train_epochs: 100
   model_output_path: "../results/checkpoints/epoch_{}.pt"
   load_saved_model: False # if you want pre-trained model weights to be loaded
   model_input_path: "output/model/pems08/epoch_58_model.pt" # pretrained model path
@@ -28,7 +28,9 @@ model:
     dropout_e_rep: 0.2 # dropout applied to the final output of temporal encoder layer of the second encoder (representative time sequence)
   gat:
     ogm_input_dim: 2
-    dim_model: 16
+    dim_model: 32
+    dim_cell_model: 16
+    dim_adj_model: 32
     dim_edge: 1
     num_heads: 4
     dropout: 0.2

@@ -338,7 +338,7 @@ class GATv2Conv(MessagePassing):
         self.loss = 0  # for SGAT, making l2 loss zero at the beginning of forward
 
         # edge_updater_type: (x: PairTensor, edge_attr: OptTensor)
-        self.z = self.edge_updater(edge_index, x=(x_l_z, x_r_z), edge_attr=edge_attr, func='edge_update_z')
+        self.z = self.edge_updater(edge_index, x=(x_l, x_r), edge_attr=edge_attr, func='edge_update_z')
         alpha = self.edge_updater(edge_index, x=(x_l, x_r), edge_attr=edge_attr, func='edge_update_alpha')
 
         # propagate_type: (x: PairTensor, alpha: Tensor)

@@ -50,6 +50,7 @@ class OGMDataset(Dataset):
         self.background_images = {}
         self.fixed_blocks_info = {}
         self.frame_to_track_idxs = {}
+        self.class_dict = {'car': 0, 'truck_bus': 1, 'bicycle': 2, 'pedestrian': 3}
 
         start_scene = 0
         end_scene = 19

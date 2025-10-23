@@ -8,8 +8,9 @@ model:
   model_output_path: "../results/checkpoints/epoch_{}.pt"
   load_saved_model: False # if you want pre-trained model weights to be loaded
   model_input_path: "output/model/pems08/epoch_58_model.pt" # pretrained model path
-  log_file: "../results/app.log" # pretrained model path
-  device: cuda # decides GPU or CPU for training
+  log_file: "../results/app_{}.log" # pretrained model path
+  tb_log_dir: "../results/runs/" # tensorboard log dir
+  device: cpu # decides GPU or CPU for training
   graph_weight_encoder:
     dim_model: 64 # dimension that embedding layer maps the input of the model to.
     seq_len: 21 # input sequence length

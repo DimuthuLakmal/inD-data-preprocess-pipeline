@@ -1,7 +1,9 @@
 import argparse
 import logging
+from datetime import datetime
 
 import torch
+from torch.utils.tensorboard import SummaryWriter
 import yaml
 
 from dataset.data_loader import OGMDataLoader
@@ -9,6 +11,7 @@ from models.spatio_temporal_encoder import SGATTransformer
 import torch.nn as nn
 import cv2
 
+from src.utils.metrics import compute_metrics
 from validate import evaluate
 
 
@@ -31,11 +34,16 @@ def create_args():
 
 def train(model, train_data_loader, valid_data_loader, config):
     logging.basicConfig(
-        filename=config['model']['log_file'],  # Specify the log file name
+        filename=config['model']['log_file'].format(str(datetime.now())),  # Specify the log file name
         level=logging.INFO,  # Set the logging level (e.g., INFO, DEBUG, WARNING, ERROR, CRITICAL)
         format='%(asctime)s - %(levelname)s - %(message)s',  # Define the log message format
         filemode='a'  # Set the file mode to 'a' for append, or 'w' for overwrite
     )
+
+    # --- TensorBoard ---
+    log_dir = config['model']['tb_log_dir']
+    writer = SummaryWriter(log_dir=log_dir)
+    global_step = 0
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config['model']['lr'])
     optimizer.zero_grad()
@@ -51,6 +59,8 @@ def train(model, train_data_loader, valid_data_loader, config):
         model.train()
 
         total_loss = 0.0
+        total_metrics = {"accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1": 0.0}
+        roc_count = 0  # count batches where ROC was computable
         batch_itr = 0
 
         for batch_idx, (inputs, target) in enumerate(train_data_loader):
@@ -79,7 +89,18 @@ def train(model, train_data_loader, valid_data_loader, config):
             loss_aggregated = loss_fn_aggregated(outputs, targets)
             loss_aggregated = loss_aggregated * mask
             loss_avg = loss_aggregated.sum() / (mask.sum().clamp_min(1))
-            accuracy = (outputs_sig.round() == targets).float().mean()
+
+            # --- metrics per batch (masked) ---
+            with torch.no_grad():
+                m = compute_metrics(outputs_sig.detach(), targets.detach(), mask.detach())
+                total_metrics["accuracy"] += m["accuracy"]
+                total_metrics["precision"] += m["precision"]
+                total_metrics["recall"] += m["recall"]
+                total_metrics["f1"] += m["f1"]
+                if m["roc_auc"] is not None:
+                    # Log batch ROC when available
+                    writer.add_scalar("train/roc_auc_batch", m["roc_auc"], global_step)
+                    roc_count += 1
 
             total_loss += loss_avg.item()
             batch_itr += 1
@@ -88,18 +109,35 @@ def train(model, train_data_loader, valid_data_loader, config):
             (loss_avg + l2_loss * 0.1).backward()
             optimizer.step()
 
+            # --- TensorBoard per-step logs ---
+            writer.add_scalar("train/loss_batch", loss_avg.item(), global_step)
+            writer.add_scalar("train/l2_loss_batch", float(l2_loss.item()), global_step)
+            writer.add_scalar("train/lr", optimizer.param_groups[0]['lr'], global_step)
+
             if batch_idx % 10 == 0:  # Log every 10 batches
-                print(f'Train Epoch {epoch}, Batch {batch_idx}, Loss: {loss_avg.item()}, Items: {torch.sum(mask.int())}')
-                logging.info(f'Train Epoch {epoch}, Batch {batch_idx}, Loss: {loss_avg.item()}, Accuracy: {accuracy.item()}')
+                print(f'Train Epoch {epoch}, Batch {batch_idx}, Loss: {loss_avg.item()}')
+                logging.info(f'Train Epoch {epoch}, Batch {batch_idx}, Loss: {loss_avg.item()}, Accuracy: {m["accuracy"]}')
+
+            global_step += 1
 
 
+        # --- Epoch-level aggregates ---
         train_loss = total_loss / batch_itr
+        avg_metrics = {k: v / batch_itr for k, v in total_metrics.items()}
 
         print(f'Epoch {epoch}, Training Loss: {train_loss}')
-        logging.info(f'Epoch {epoch}, Training Loss: {train_loss}')
+        logging.info(f'Epoch {epoch}, Training Loss: {train_loss}, '
+                     f'Acc: {avg_metrics["accuracy"]}, P: {avg_metrics["precision"]}, '
+                     f'R: {avg_metrics["recall"]}, F1: {avg_metrics["f1"]}')
+
+        writer.add_scalar("train/loss_epoch", train_loss, epoch)
+        writer.add_scalar("train/accuracy_epoch", avg_metrics["accuracy"], epoch)
+        writer.add_scalar("train/precision_epoch", avg_metrics["precision"], epoch)
+        writer.add_scalar("train/recall_epoch", avg_metrics["recall"], epoch)
+        writer.add_scalar("train/f1_epoch", avg_metrics["f1"], epoch)
 
         # Validate the model
-        valid_loss = evaluate(model, valid_data_loader, config['model']["device"])
+        valid_loss = evaluate(model, valid_data_loader, config['model']["device"], writer, epoch)
         print(f'Epoch {epoch}, Validation Loss: {valid_loss}')
         logging.info(f'Epoch {epoch}, Validation Loss: {valid_loss}')
 
@@ -113,6 +151,8 @@ def train(model, train_data_loader, valid_data_loader, config):
         if config['model']['use_lr_scheduler']:
             lr_scheduler.step()
             print(f'Learning rate adjusted to: {lr_scheduler.get_last_lr()[0]}')
+
+    writer.close()
 
     # Save the final model checkpoint
     torch.save(model.state_dict(), config['model']['model_output_path'].format('final'))

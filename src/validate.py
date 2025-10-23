@@ -1,12 +1,15 @@
 import argparse
 import logging
+import numpy as np
 
 import torch
 import torch.nn as nn
 import cv2
 
+from src.utils.metrics import compute_metrics
 
-def evaluate(model, valid_data_loader, device):
+
+def evaluate(model, valid_data_loader, device, writer=None, epoch=0):
     model.eval()
 
     loss_fn_aggregated = nn.BCEWithLogitsLoss(reduction='none')
@@ -14,6 +17,9 @@ def evaluate(model, valid_data_loader, device):
     with torch.no_grad():  # Example: 10 epochs
 
         total_loss = 0.0
+        v_total = {"loss": 0.0, "accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1": 0.0}
+        v_batches = 0
+        v_roc = []
         batch_itr = 0
 
         for batch_idx, (inputs, target) in enumerate(valid_data_loader):
@@ -43,17 +49,28 @@ def evaluate(model, valid_data_loader, device):
             loss_aggregated = loss_aggregated * mask
             scene_wise_loss = list(loss_aggregated.detach().cpu().numpy())
             loss_avg = loss_aggregated.sum() / (mask.sum().clamp_min(1))
-            accuracy = (outputs_sig.round() == targets).float().mean()
 
-            total_loss += loss_avg.item()
+            v_total["loss"] += loss_avg.item()
+            m = compute_metrics(outputs_sig, targets, mask)
+            for k in ("accuracy", "precision", "recall", "f1"):
+                v_total[k] += m[k]
+            if m["roc_auc"] is not None:
+                v_roc.append(m["roc_auc"])
+
             batch_itr += 1
 
             scene_data = [(arr[0], scene_loss) for (arr, scene_loss) in zip(list(inputs["scene_id"].detach().cpu().numpy()), scene_wise_loss)]
-        
-            print(f'Batch {batch_idx}, Loss: {loss_avg.item()}, Items: {torch.sum(mask.int())}, Scenes: {scene_data}')
-            # print(f'Batch {batch_idx}, Loss: {loss_aggregated.item()}')
-            logging.info(f'Batch {batch_idx}, Loss: {loss_avg.item()}, Accuracy: {accuracy.item()}')
 
-        valid_loss = total_loss / batch_itr
+    valid_loss = v_total["loss"] / batch_itr
+    writer.add_scalar("val/loss_epoch", valid_loss, epoch)
+    writer.add_scalar("val/accuracy_epoch", v_total["accuracy"] / batch_itr, epoch)
+    writer.add_scalar("val/precision_epoch", v_total["precision"] / batch_itr, epoch)
+    writer.add_scalar("val/recall_epoch", v_total["recall"] / batch_itr, epoch)
+    writer.add_scalar("val/f1_epoch", v_total["f1"] / batch_itr, epoch)
+    if len(v_roc) > 0:
+        writer.add_scalar("val/roc_auc_epoch", float(np.mean(v_roc)), epoch)
+
+    print(f'Epoch {epoch}, Validation Loss: {valid_loss}')
+    logging.info(f'Epoch {epoch}, Validation Loss: {valid_loss}')
 
     return valid_loss

@@ -103,9 +103,9 @@ class TrackVisualizer(object):
         for x in toolbar.actions():
             if x.text() in unwanted_buttons:
                 toolbar.removeAction(x)
-
-        self.fig.canvas.set_window_title("Tracks Visualizer - Dataset {}, Recording {}".format(self.dataset,
-                                                                                               self.recording_name))
+        #
+        # self.fig.canvas.set_window_title("Tracks Visualizer - Dataset {}, Recording {}".format(self.dataset,
+        #                                                                                        self.recording_name))
 
         # Show background image
         background_image_path = self.config["background_image_path"]

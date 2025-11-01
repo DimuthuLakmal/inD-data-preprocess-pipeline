@@ -52,6 +52,6 @@ class SGATTransformer(nn.Module):
 
         h_fused, gates = self.fusion(gat_out, map_output)
 
-        out_fc = self.fc_out(gat_out)
+        out_fc = self.fc_out(h_fused)
 
         return out_fc, gates

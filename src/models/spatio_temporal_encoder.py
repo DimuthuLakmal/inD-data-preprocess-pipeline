@@ -25,9 +25,9 @@ class SGATTransformer(nn.Module):
         gat_configs = configs['gat']
         self.gat_layer = GATLayer(gat_configs)
 
-        self.map_encoder = FrameEncoder(d_model=256, pretrained=True, global_pool='avg')
+        self.map_encoder = FrameEncoder(d_model=64, pretrained=True, global_pool='avg')
 
-        self.fusion = GatedFusion(d_veh=32, d_img=256, q_dim=32, use_cell_in_gate=False)
+        self.fusion = GatedFusion(d_veh=32, d_img=64, q_dim=32, use_cell_in_gate=False)
 
         self.fc_out = nn.Linear(32, 1)
 
@@ -53,6 +53,6 @@ class SGATTransformer(nn.Module):
 
         h_fused, gates = self.fusion(gat_out, map_output)
 
-        out_fc = self.fc_out(gat_out)
+        out_fc = self.fc_out(h_fused)
 
         return out_fc, gates, l2_loss

@@ -25,7 +25,7 @@ from torch_geometric.utils import (
 from torch_geometric.utils.sparse import set_sparse_value
 
 from src.models.gat.message_passing import MessagePassing
-from src.models.gat.sgat_utils import l0_train, l0_test, get_loss2
+from src.models.gat.sgat_utils import l0_train, l0_test, get_loss2, masked_normalize_multihead
 
 if typing.TYPE_CHECKING:
     from typing import overload
@@ -188,6 +188,8 @@ class GATv2Conv(MessagePassing):
                                     bias=bias, weight_initializer='glorot')
 
         self.att = Parameter(torch.empty(1, heads, out_channels))
+        self.att_z_l = Parameter(torch.empty(1, heads, out_channels))
+        self.att_z_r = Parameter(torch.empty(1, heads, out_channels))
 
         if edge_dim is not None:
             self.lin_edge = Linear(edge_dim, heads * out_channels, bias=False,
@@ -225,6 +227,7 @@ class GATv2Conv(MessagePassing):
 
         # for SGAT
         self.bias_l0 = nn.Parameter(torch.FloatTensor([0]))
+        self.bias_l0_z = nn.Parameter(torch.FloatTensor([0]))
         self.loss = 0
 
         self.reset_parameters()
@@ -233,8 +236,8 @@ class GATv2Conv(MessagePassing):
         super().reset_parameters()
         nn.init.uniform_(self.lin_l.weight, a=-1.0, b=1.0)
         nn.init.uniform_(self.lin_r.weight, a=-1.0, b=1.0)
-        # nn.init.uniform_(self.lin_r_z.weight, a=-1.0, b=1.0)
-        # nn.init.uniform_(self.lin_l_z.weight, a=-1.0, b=1.0)
+        # nn.init.uniform_(self.lin_r_z.weight, a=1.0, b=1.0)
+        # nn.init.uniform_(self.lin_l_z.weight, a=1.0, b=1.0)
 
         # self.lin_l.reset_parameters()
         # self.lin_r.reset_parameters()
@@ -245,6 +248,8 @@ class GATv2Conv(MessagePassing):
             nn.init.uniform_(self.res.weight, a=-1.0, b=1.0)
             # self.res.reset_parameters()
         glorot(self.att)
+        glorot(self.att_z_l)
+        glorot(self.att_z_r)
         zeros(self.bias)
 
     @overload
@@ -320,17 +325,17 @@ class GATv2Conv(MessagePassing):
             else:
                 x_r = self.lin_r(x).view(-1, H, C)
         else:
-            x_l_input, x_r_input = x[0], x[1]
+            x_l_input, x_z_input, x_r_input, x_r_z_input = x[0], x[1], x[2], x[3]
             assert x[0].dim() == 2
 
             if x_r_input is not None and self.res is not None:
                 res = self.res(x_r_input)
 
             x_l = self.lin_l(x_l_input).view(-1, H, C)
-            x_l_z = self.lin_l_z(x_l_input).view(-1, H, C)
+            x_l_z = self.lin_l_z(x_z_input).view(-1, H, C)
             if x_r_input is not None:
                 x_r = self.lin_r(x_r_input).view(-1, H, C)
-                x_r_z = self.lin_r_z(x_r_input).view(-1, H, C)
+                x_r_z = self.lin_r_z(x_r_z_input).view(-1, H, C)
 
         assert x_l is not None
         assert x_r is not None
@@ -338,7 +343,7 @@ class GATv2Conv(MessagePassing):
         self.loss = 0  # for SGAT, making l2 loss zero at the beginning of forward
 
         # edge_updater_type: (x: PairTensor, edge_attr: OptTensor)
-        self.z = self.edge_updater(edge_index, x=(x_l, x_r), edge_attr=edge_attr, func='edge_update_z')
+        self.z = self.edge_updater(edge_index, x=(x_l_z, x_r_z), edge_attr=edge_attr, func='edge_update_z')
         alpha = self.edge_updater(edge_index, x=(x_l, x_r), edge_attr=edge_attr, func='edge_update_alpha')
 
         # propagate_type: (x: PairTensor, alpha: Tensor)
@@ -366,14 +371,15 @@ class GATv2Conv(MessagePassing):
             elif isinstance(edge_index, SparseTensor):
                 return out, edge_index.set_value(alpha, layout='coo')
         else:
-            return out, self.loss
+            return out, self.loss, self.z
 
-    def edge_update_z(self, x_j: Tensor, x_i: Tensor, edge_attr: OptTensor,
+    def edge_update_(self, x_j: Tensor, x_i: Tensor, edge_attr: OptTensor,
                       index: Tensor, ptr: OptTensor,
                       dim_size: Optional[int]) -> Tensor:
         # an edge UDF to compute unnormalized attention values from src and dst
-        tmp = x_i.sum(dim=-1).unsqueeze(-1) + x_j.sum(dim=-1).unsqueeze(-1)
-        logits = tmp + self.bias_l0
+        tmp = (x_i).sum(dim=-1).unsqueeze(-1) + (x_j).sum(dim=-1).unsqueeze(-1)
+        logits = tmp + self.bias_l0_z
+        # logits = x_i + x_j
 
         if edge_attr is not None:
             if edge_attr.dim() == 1:
@@ -383,20 +389,62 @@ class GATv2Conv(MessagePassing):
             edge_attr = edge_attr.view(-1, self.heads, self.out_channels)
             logits = logits + edge_attr.sum(dim=-1).unsqueeze(-1)
 
+        # logits = F.leaky_relu(logits, self.negative_slope)
+        # logits = (logits * self.att_z_l).sum(dim=-1)
+
         if self.training:
-            z = l0_train(logits, 0, 1).squeeze(-1)
+            z_raw = l0_train(logits, 0, 1).squeeze(-1)
         else:
-            z = l0_test(logits, 0, 1).squeeze(-1)
+            z_raw = l0_test(logits, 0, 1).squeeze(-1)
 
-        self.loss = get_loss2(logits[:, 0, :]).sum()
+        self.loss = get_loss2(logits[:, :, :]).sum()
 
-        return z
+        return z_raw
+
+    def edge_update_z(self, x_j: Tensor, x_i: Tensor, edge_attr: OptTensor,
+                      index: Tensor, ptr: OptTensor,
+                      dim_size: Optional[int]):
+        # x_i, x_j: [E, H, C]
+
+        # Aggregate over heads + channels to get a single scalar per edge:
+        h = x_i + x_j  # [E, H, C]
+        # h_edge = h.mean(dim=(1, 2), keepdim=True)  # [E, 1]
+        h_edge = h.sum(dim=-1)
+
+        logits = h_edge.squeeze(-1) + self.bias_l0_z  # bias_l0_global: [1] or [1,1]
+
+        if edge_attr is not None:
+            if edge_attr.dim() == 1:
+                edge_attr = edge_attr.view(-1, 1)
+            edge_attr = self.lin_edge_z(edge_attr)  # [E, C']
+            # logits = logits + edge_attr.mean(dim=-1, keepdim=True)  # [E,1]
+            logits = logits + edge_attr.sum(dim=-1, keepdim=True)  # [E,1]
+
+        logits = logits - logits.mean(dim=-1, keepdim=True)
+        logits = logits / (logits.std(dim=-1, keepdim=True) + 1e-6)
+        # logits = logits * 0.5
+
+        if self.training:
+            # z_raw = l0_train(logits, 0, 1).squeeze(-1)  # [E]
+            num_samples = 4
+            masks = []
+            for _ in range(num_samples):
+                masks.append(l0_train(logits, 0.0, 1.0))
+            z_raw = torch.stack(masks, dim=0).mean(dim=0).squeeze(-1)
+        else:
+            z_raw = l0_test(logits, 0, 1).squeeze(-1)  # [E]
+
+        self.loss = get_loss2(logits.squeeze(-1)).sum()
+
+        # return z_raw.unsqueeze(-1).expand(-1, self.heads)  # [E]
+        return z_raw # [E]
 
     def edge_update_alpha(self, x_j: Tensor, x_i: Tensor, edge_attr: OptTensor,
                           index: Tensor, ptr: OptTensor,
                           dim_size: Optional[int],
                           z: Tensor) -> Tensor:
         x = x_i + x_j
+        tmp = (x_i).sum(dim=-1).unsqueeze(-1) + (x_j).sum(dim=-1).unsqueeze(-1)
 
         if edge_attr is not None:
             if edge_attr.dim() == 1:
@@ -408,9 +456,16 @@ class GATv2Conv(MessagePassing):
 
         x = F.leaky_relu(x, self.negative_slope)
         alpha = (x * self.att).sum(dim=-1)
-        alpha = alpha * self.z
+
+        # check if self.z has any zero entries
+        # if torch.any(self.z == 0):
+        #     print("Zero entries in z detected during alpha computation.")
 
         alpha = softmax(alpha, index, ptr, dim_size)
+        alpha = alpha * self.z
+        # alpha = alpha
+        # alpha = masked_normalize_multihead(alpha, index, dim_size)
+
         alpha = F.dropout(alpha, p=self.dropout, training=self.training)
 
         return alpha

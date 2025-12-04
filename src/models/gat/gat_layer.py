@@ -23,18 +23,22 @@ class GATLayer(nn.Module):
                              add_self_loops=False)
 
         self.cell_emb = CellQueryEmb(d_model=dim_cell_model, mode="mlp")
+        self.cell_emb_z = CellQueryEmb(d_model=dim_cell_model, mode="mlp")
 
-    def forward(self, x_te_batch, cell_batch, edge_attr_batch, edge_index_batch):
+    def forward(self, x_te_batch, x_te_z_batch, cell_batch, edge_attr_batch, edge_index_batch):
         x_cell_batch = self.cell_emb(cell_batch)
+        x_cell_z_batch = self.cell_emb_z(cell_batch)
 
         gat_out_batch = []
+        z_mask_batch = []
         ls_loss_batch = 0
-        for (x_te, x_cell, edge_index, edge_attr) in zip(x_te_batch, x_cell_batch, edge_index_batch, edge_attr_batch):
+        for (x_te, x_te_z, x_cell, x_cell_z, edge_index, edge_attr) in zip(x_te_batch, x_te_z_batch, x_cell_batch, x_cell_z_batch, edge_index_batch, edge_attr_batch):
             edge_index = edge_index.to(x_te.device)
             edge_attr = edge_attr.to(x_te.device)
 
-            gat_out, l2_loss = self.gat([x_te, x_cell], edge_index, edge_attr)
+            gat_out, l2_loss, z_mask = self.gat([x_te, x_te_z, x_cell, x_cell_z], edge_index, edge_attr)
             gat_out_batch.append(gat_out)
+            z_mask_batch.append(z_mask)
             ls_loss_batch += l2_loss
 
-        return torch.stack(gat_out_batch), ls_loss_batch
+        return torch.stack(gat_out_batch), ls_loss_batch, z_mask_batch

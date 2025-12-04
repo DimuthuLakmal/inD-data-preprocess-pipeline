@@ -52,8 +52,9 @@ def train(model, train_data_loader, valid_data_loader, config):
     best_loss = float('inf')
 
     if config['model']['use_lr_scheduler']:
-        lambda1 = lambda epoch: 0.9 ** epoch
-        lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
+        # lambda1 = lambda epoch: 0.9 ** epoch
+        # lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda1)
+        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.985)
 
     for epoch in range(config['model']['train_epochs']):  # Example: 10 epochs
         model.train()
@@ -77,7 +78,7 @@ def train(model, train_data_loader, valid_data_loader, config):
                         targets != 3).squeeze()  # Cells occupied with fixed blocks are marked with a 3 in the target
             mask = mask * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not padded
 
-            outputs, _, l2_loss = model(inputs)
+            outputs, _, l2_loss, z_mask = model(inputs)
             outputs = outputs.squeeze()
             outputs_sig = nn.Sigmoid()(outputs)
 
@@ -106,7 +107,8 @@ def train(model, train_data_loader, valid_data_loader, config):
             batch_itr += 1
 
             optimizer.zero_grad()
-            (loss_avg + l2_loss * 0.1).backward()
+            (loss_avg + l2_loss * 0.01).backward()
+            # (loss_avg).backward()
             optimizer.step()
 
             # --- TensorBoard per-step logs ---
@@ -141,9 +143,13 @@ def train(model, train_data_loader, valid_data_loader, config):
         print(f'Epoch {epoch}, Validation Loss: {valid_loss}')
         logging.info(f'Epoch {epoch}, Validation Loss: {valid_loss}')
 
+        # Save model checkpoint
+        model_path = config['model']['model_output_path']
+        torch.save(model.state_dict(), model_path.format(epoch))
+
         if valid_loss < best_loss:
             best_loss = valid_loss
-            best_path = config['model']['model_output_path']
+            best_path = "../results/checkpoints/best.pt"
             torch.save(model.state_dict(), best_path.format(epoch))
             print(f'New best model saved at epoch {epoch} with validation loss {best_loss}')
             logging.info(f'New best model saved at epoch {epoch} with validation loss {best_loss}')
@@ -167,5 +173,7 @@ if __name__ == '__main__':
     valid_dataloader = OGMDataLoader(config['data'], phase='validation').create_dataloader()
 
     model = SGATTransformer(config['model']).to(config['model']["device"])
+    # model.load_state_dict(torch.load(config['model']['model_output_path'].format(98)))
+    # model = model.to(config['model']["device"])
 
     train(model, train_dataloader, valid_dataloader, config)

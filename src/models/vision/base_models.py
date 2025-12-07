@@ -19,7 +19,7 @@ class FrameEncoder(nn.Module):
     Input : imgs [B, T, 3, H, W]
     Output: emb  [B, T, D]
     """
-    def __init__(self, d_model=256, pretrained=True, global_pool='avg', p_spatial_dropout=0.3, p_embed_dropout=0.3):
+    def __init__(self, d_model=256, pretrained=True, global_pool='avg', p_spatial_dropout=0.2, p_embed_dropout=0.2):
         super().__init__()
         m = resnet50(weights="DEFAULT" if pretrained else None)
 

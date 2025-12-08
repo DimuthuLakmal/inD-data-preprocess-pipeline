@@ -399,7 +399,7 @@ class OGMDataset(Dataset):
         }
 
     def _get_current_index(self, track_meta, t: int) -> int:
-        initial_frame = track_meta["initialFrame"].item()
+        initial_frame = track_meta["initialFrame"]
         current_index = t - initial_frame
         return current_index
 

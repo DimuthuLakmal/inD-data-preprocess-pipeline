@@ -11,12 +11,12 @@ class OGMDataLoader():
 
     def create_dataloader(self):
         dataset = OGMDataset(self.cfg)
-        # for i, sample in enumerate(dataset):
-        #     print(i, sample)
+        for i, sample in enumerate(dataset):
+            print(i, sample)
 
-        dataloader = DataLoader(dataset=dataset,
-                                batch_size=self.cfg['batch_size'],
-                                shuffle=(self.phase == 'train'),
-                                collate_fn=custom_collate,
-                                num_workers=self.cfg['num_workers'])
-        return dataloader
+        # dataloader = DataLoader(dataset=dataset,
+        #                         batch_size=self.cfg['batch_size'],
+        #                         shuffle=(self.phase == 'train'),
+        #                         collate_fn=custom_collate,
+        #                         num_workers=self.cfg['num_workers'])
+        # return dataloader

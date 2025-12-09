@@ -14,10 +14,6 @@ class SGATTransformer(nn.Module):
 
         self.device = configs['device']
 
-        gwe_configs = configs['graph_weight_encoder']
-        gwe_configs['device'] = self.device
-        self.gw_encoder = GraphWeightEncoder(gwe_configs)
-
         te_configs = configs['temporal_encoder']
         te_configs['device'] = self.device
         self.temporal_encoder = VehicleTemporalEncoder(10, 32, nhead=4, num_layers=2, dropout=0.1)

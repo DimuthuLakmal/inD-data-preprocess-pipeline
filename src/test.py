@@ -35,7 +35,7 @@ if __name__ == '__main__':
     valid_dataloader = OGMDataLoader(config['data'], phase='validation').create_dataloader()
 
     model = SGATTransformer(config['model']).to(config['model']["device"])
-    model.load_state_dict(torch.load(config['model']['model_output_path'].format(89)))
+    model.load_state_dict(torch.load(config['model']['model_output_path'].format(133)))
     model = model.to(config['model']["device"])
 
     test_loss = evaluate(model, valid_dataloader, config['model']["device"])

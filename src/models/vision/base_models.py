@@ -21,14 +21,14 @@ class FrameEncoder(nn.Module):
     """
     def __init__(self, d_model=256, pretrained=True, global_pool='avg', p_spatial_dropout=0.2, p_embed_dropout=0.2):
         super().__init__()
-        m = resnet50(weights="DEFAULT" if pretrained else None)
+        m = resnet18(weights="DEFAULT" if pretrained else None)
 
         # Take ResNet trunk up to C5
         self.backbone = nn.Sequential(
             m.conv1, m.bn1, m.relu, m.maxpool,
             m.layer1, m.layer2, m.layer3, m.layer4
         )
-        c5 = 2048
+        c5 = 512
 
         self.spatial_drop = nn.Dropout2d(p_spatial_dropout)
 

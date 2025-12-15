@@ -16,8 +16,8 @@ class SGATTransformer(nn.Module):
 
         te_configs = configs['temporal_encoder']
         te_configs['device'] = self.device
-        self.temporal_encoder = VehicleTemporalEncoder(10, 32, nhead=4, num_layers=2, dropout=0.1)
-        self.z_encoder = VehicleTemporalEncoder(10, 32, nhead=4, num_layers=2, dropout=0.1)
+        self.temporal_encoder = VehicleTemporalEncoder(10, 32, nhead=4, num_layers=2, dropout=0.2)
+        self.z_encoder = VehicleTemporalEncoder(10, 32, nhead=4, num_layers=2, dropout=0.2)
 
         gat_configs = configs['gat']
         self.gat_layer = GATLayer(gat_configs)
@@ -41,7 +41,7 @@ class SGATTransformer(nn.Module):
         map_img = x['map_obs']
 
         x_te = self.temporal_encoder(veh_feat, seq_mask, vehicle_mask)
-        z_te = self.temporal_encoder(veh_feat, seq_mask, vehicle_mask)
+        z_te = self.z_encoder(veh_feat, seq_mask, vehicle_mask)
         gat_out, l2_loss, z_mask = self.gat_layer(x_te, z_te, cell_feat, x['edge_weights'], x['edge_index'])
         gat_out = gat_out.squeeze(1)
 

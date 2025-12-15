@@ -51,8 +51,8 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0):
             outputs = outputs.squeeze()
             outputs_sig = nn.Sigmoid()(outputs)
 
-            flops = FlopCountAnalysis(model, inputs)
-            print("Total FLOPs: ", flops.total())
+            # flops = FlopCountAnalysis(model, inputs)
+            # print("Total FLOPs: ", flops.total())
 
             # Calculate the binary cross-entropy loss
             targets = targets.squeeze() * mask

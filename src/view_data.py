@@ -78,6 +78,7 @@ def draw_poly(ax, poly_pts, color):
 
 
 def overlay_clickable_polygons(ax, cell_coords, visibilities, labels, edge_unselected="yellow", edge_selected="red",
+                               hidden_track_ids=None,
                                face_unselected=(1,1,0,0.10),  # light fill for easier picking
                                face_selected=(1,0,0,0.25)):
     """
@@ -112,10 +113,18 @@ def overlay_clickable_polygons(ax, cell_coords, visibilities, labels, edge_unsel
         shapely_polygon = ShapelyPolygon(pts)
         centroid_point = shapely_polygon.centroid
 
+        row = int(i/20) # assuming 20 cells per row
+        col = int(i%20)
+
+        track_ids = -1
+        if hidden_track_ids is not None:
+            track_ids = hidden_track_ids.get((row, col), -1)
+
         id_to_data[i] = {
             "index": i,
             "label": label,  # raw vertices
             "centroid": [centroid_point.x, centroid_point.y],
+            "track_ids": [track_ids]
         }
 
         patch_to_id[p] = i
@@ -164,7 +173,7 @@ def draw_frame(map_img, adj_vehicle_data, ego_vehicle_data, hidden_tracks_pts, t
     return _fig_to_rgb_array(fig)
 
 
-def interactive_playback(frames, omg_cells, visibilities, labels, map_shape, on_save=None, key=None):
+def interactive_playback(frames, omg_cells, visibilities, labels, map_shape, on_save=None, key=None, hidden_tracks_id_ogm_data=None):
     """frames: list of HxWx3 uint8 arrays"""
     fig, ax = plt.subplots(figsize=(map_shape[1] / 100, map_shape[0] / 100), dpi=100)
     im = ax.imshow(frames[0])
@@ -219,7 +228,8 @@ def interactive_playback(frames, omg_cells, visibilities, labels, map_shape, on_
             payload.append({
                 "index": int(d["index"]),
                 "centroid": (float(d["centroid"][0]), float(d["centroid"][1])),
-                "label": d["label"]
+                "label": d["label"],
+                "track_ids": d["track_ids"],
             })
         return payload
 
@@ -241,7 +251,7 @@ def interactive_playback(frames, omg_cells, visibilities, labels, map_shape, on_
         _clear_overlays(remove_patches=True)
         if (frame_idx["i"] == len(frames) - 1) and len(omg_cells) > 0:
             # Draw overlays
-            ovr = overlay_clickable_polygons(ax, omg_cells, visibilities, labels)
+            ovr = overlay_clickable_polygons(ax, omg_cells, visibilities, labels, hidden_track_ids=hidden_tracks_id_ogm_data)
             overlays.update(ovr)
 
             # Picker handler (toggle selection)
@@ -332,9 +342,9 @@ background_images = {}
 fixed_blocks_info = {}
 frame_to_track_idxs = {}
 
-start_scene = 1
-end_scene = 2
-filename = "index_map8.pkl"
+start_scene = 3
+end_scene = 4
+filename = "index_map12.pkl"
 
 data_dict_all = {}
 
@@ -346,7 +356,7 @@ if index_file_path.exists():
 
     # Loading background images
     for scene_id in scene_ids:
-        if int(scene_id) < start_scene or int(scene_id) > end_scene:
+        if int(scene_id) < start_scene or int(scene_id) >= end_scene:
             continue
 
         # Store background images for scenes
@@ -364,7 +374,7 @@ for idx in range(len(keys)):
     current_frame = int(key_elements[1])
     ego_vehicle_track_idx = int(key_elements[2])
 
-    skip_until_scene_id = 0
+    skip_until_scene_id = 2
     if skip_until_scene_id != -1 and scene_id < skip_until_scene_id:
         continue
 
@@ -381,6 +391,7 @@ for idx in range(len(keys)):
     historical_adjacent_obs, historical_ego_obs = data_dict["historical_adjacent_obs"], data_dict["historical_ego_obs"]
     hidden_ogm_cells = data_dict["hidden_ogm_cells"]
     hidden_tracks_pts = data_dict["hidden_tracks_pts"]
+    hidden_tracks_id_ogm_data = data_dict["hidden_tracks_id_ogm"]
     omg_cells_coords = np.array(data_dict["cell_coords"])
     ogm_cell_label_data = data_dict["ogm_gt"].reshape(-1)
     ogm_cell_visibility_data = data_dict["ogm"].reshape(-1)
@@ -399,7 +410,7 @@ for idx in range(len(keys)):
     def save_callback(payload):
         file_path = os.path.join(output_path, f"{key}.json")
 
-        brief = [{"index": d["index"], "cx": d["centroid"][0], "cy": d["centroid"][1], "label": d["label"]} for d in payload]
+        brief = [{"index": d["index"], "cx": d["centroid"][0], "cy": d["centroid"][1], "label": d["label"], "track_ids":  d["track_ids"]} for d in payload]
         with open(file_path, "w") as f:
             json.dump(brief, f, indent=2)
 
@@ -413,7 +424,8 @@ for idx in range(len(keys)):
         ogm_cell_label_data,
         backgrond_img.shape,
         on_save=save_callback,
-        key=key
+        key=key,
+        hidden_tracks_id_ogm_data=hidden_tracks_id_ogm_data,
     )
 
     # When the window is closed, you still get everything:

@@ -14,7 +14,7 @@ CELL_SIZE = 20
 GRID_ROWS = GRID_COLS = 20  # 20x20 grid
 
 
-def create_OGM_ego(ego_pts, ego_heading, visible_bbox, hidden_bbox, image, fixed_blocks):
+def create_OGM_ego(ego_pts, ego_heading, visible_bbox, hidden_bbox, hidden_tracks_ids, image, fixed_blocks):
     driver_seat_loc = get_driver_center(ego_pts, ego_heading)
 
     # Example ego position (in pixel coordinates)
@@ -115,13 +115,18 @@ def create_OGM_ego(ego_pts, ego_heading, visible_bbox, hidden_bbox, image, fixed
     grid_gt = deepcopy(grid)  # keep ground truth for occlusion detection
 
     # Mark if the cell is occupied by a hidden vehicle. This will be used later for loop
+    hidden_tracks_id_ogm = {}
     for r in range(GRID_ROWS):
         for c in range(GRID_COLS):
             cell = cell_polygons[r][c]
-            for poly in hidden_vehicle_polygons:
+            for track_id, poly in zip(hidden_tracks_ids, hidden_vehicle_polygons):
                 if cell.intersects(poly):
                     if is_fully_occupied(cell, poly):
                         grid[r, c] = 2  # occupied
+                        if (r, c) not in hidden_tracks_id_ogm.keys():
+                            hidden_tracks_id_ogm[(r, c)] = [track_id]
+                        else:
+                            hidden_tracks_id_ogm[(r, c)].append(track_id)
                         break
                     else:
                         grid[r, c] = 0
@@ -130,7 +135,7 @@ def create_OGM_ego(ego_pts, ego_heading, visible_bbox, hidden_bbox, image, fixed
     # If not, then return None as the data is not useful
     has_hidden_vehicle = np.any(grid == 2)
     if not has_hidden_vehicle:
-        return None, None, None, None, None  # no hidden vehicles detected
+        return None, None, None, None, None, None  # no hidden vehicles detected
 
     # The following indices will be used to sample the cells later
     occupied_by_hidden_indices = np.where(grid == 2)
@@ -185,7 +190,7 @@ def create_OGM_ego(ego_pts, ego_heading, visible_bbox, hidden_bbox, image, fixed
     # grid[occupied_by_hidden_indices] = 0.5  # mark as occluded
 
     # Store hidden cell centroids for extracting edge info in later steps
-    hidden_cell_data = []
+    hidden_cell_data = []  # This is actually not in use right now, because, the hidden cells are manually picked later.
     hidden_cell_polygon_xys = []
     for r, c in zip(selected_indices_raws, selected_indices_cols):
         cx, cy = cell_polygons[r][c].centroid.coords[0]
@@ -198,7 +203,7 @@ def create_OGM_ego(ego_pts, ego_heading, visible_bbox, hidden_bbox, image, fixed
     # _visualise(image, visible_vehicle_polygons + hidden_vehicle_polygons, driver_seat_loc, cell_polygons, grid)
     # _visualise(image, visible_vehicle_polygons + hidden_vehicle_polygons, driver_seat_loc, cell_polygons, grid_gt)
 
-    return grid, grid_gt, hidden_cell_data, hidden_cell_polygon_xys, cell_coords
+    return grid, grid_gt, hidden_cell_data, hidden_cell_polygon_xys, cell_coords, hidden_tracks_id_ogm
 
 
 def _filter_irrelevant_regions(cell_polygons, map_image):

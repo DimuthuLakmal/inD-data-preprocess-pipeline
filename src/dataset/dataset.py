@@ -47,9 +47,9 @@ class OGMDataset(Dataset):
         self.frame_to_track_idxs = {}
         self.class_dict = {'car': 0, 'truck_bus': 1, 'bicycle': 2, 'pedestrian': 3}
 
-        start_scene = 1
-        end_scene = 2
-        filename = "index_map8.pkl"
+        start_scene = 3
+        end_scene = 4
+        filename = "index_map12.pkl"
 
         self.data_dict = {}
 
@@ -61,7 +61,7 @@ class OGMDataset(Dataset):
 
             # Loading background images
             for scene_id in scene_ids:
-                if int(scene_id) < start_scene or int(scene_id) > end_scene:
+                if int(scene_id) < start_scene or int(scene_id) >= end_scene:
                     continue
 
                 # Store background images for scenes
@@ -72,7 +72,7 @@ class OGMDataset(Dataset):
         else:
             for scene_id in scene_ids:
 
-                if int(scene_id) < start_scene or int(scene_id) > end_scene:
+                if int(scene_id) < start_scene or int(scene_id) >= end_scene:
                     continue
 
                 tracks_file = os.path.join(self.input_path, f"{scene_id}_tracks.csv")
@@ -130,7 +130,7 @@ class OGMDataset(Dataset):
 
             for scene_id in scene_ids:
                 scene_id = int(scene_id)
-                if scene_id < start_scene or scene_id > end_scene:
+                if scene_id < start_scene or scene_id >= end_scene:
                     continue
 
                 tracks_meta = self.tracks_meta[(self.tracks_meta["recordingId"] == scene_id)]
@@ -204,19 +204,20 @@ class OGMDataset(Dataset):
                                                        self.background_images[scene_id].shape)["pts"]
                     heading_ego = self._get_heading(ego_track, ego_track_meta, i_frame)
 
-                    # extract historical data for the ego vehicle
+                    # extract historical data for the ego ddd
                     historical_adjacent_obs, historical_ego_obs, map_obs, visible_tracks_pts, last_recorded_t = (
                         self._extract_historical_data(ego_track, ego_track_meta, scene_id, i_frame))
 
                     # extract ground truth data for the ego vehicle
-                    hidden_tracks_pts = self._extract_ground_truth_data(ego_track, ego_track_meta, scene_id, i_frame)
+                    hidden_tracks_pts, hidden_tracks_ids = self._extract_ground_truth_data(ego_track, ego_track_meta, scene_id, i_frame)
 
                     # Create OGM
-                    ogm, ogm_gt, hidden_ogm_cells, hidden_cell_polygon_xys, cell_coords = create_OGM_ego(
+                    ogm, ogm_gt, hidden_ogm_cells, hidden_cell_polygon_xys, cell_coords, hidden_tracks_id_ogm = create_OGM_ego(
                         pts_ego.squeeze(),
                         heading_ego,
                         visible_tracks_pts,
                         hidden_tracks_pts,
+                        hidden_tracks_ids,
                         self.background_images[
                             scene_id],
                         self.fixed_blocks_info[
@@ -245,7 +246,8 @@ class OGMDataset(Dataset):
                         "ogm_gt": ogm_gt,
                         "hidden_ogm_cells": hidden_ogm_cells,
                         "hidden_cell_polygon_xys": hidden_cell_polygon_xys,
-                        "cell_coords": cell_coords
+                        "cell_coords": cell_coords,
+                        "hidden_tracks_id_ogm": hidden_tracks_id_ogm
                     }
 
                     print(str(scene_id) + '_' + str(i_frame) + '_' + str(ego_vehicle_track_idx))
@@ -513,6 +515,7 @@ class OGMDataset(Dataset):
                                                   self.background_images[scene_id].shape)
 
         hidden_tracks_pts = []
+        hidden_tracks_ids = []
         for track in hidden_tracks:
             track_meta = self.tracks_meta[(self.tracks_meta["trackId"] == track["trackId"])
                                           & (self.tracks_meta["recordingId"] == scene_id)].iloc[0].to_dict()
@@ -527,14 +530,15 @@ class OGMDataset(Dataset):
             # Create a numpy array with the track information
             track_data = np.array([track_info["center"][0], track_info["center"][1], track_info["heading"],
                                    track_info["xVelocity"], track_info["yVelocity"], track_info["xAcceleration"],
-                                   track_info["yAcceleration"], distance])
+                                   track_info["yAcceleration"], self.class_dict[track_meta["class"]], distance])
 
             hidden_tracks_pts.append(np.squeeze(pts))
+            hidden_tracks_ids.append(track["trackId"])
 
             # cv2.fillPoly(backgrond_img, [pts], (0, 255, 255))
 
         # cv2.imshow('Image with Polygon', backgrond_img)
-        return hidden_tracks_pts
+        return hidden_tracks_pts, hidden_tracks_ids
 
     def _extract_edge_info(self, historical_adjacent_obs, hidden_ogm_cells, last_recorded_t) -> Tuple[list, list]:
         edge_weights = []

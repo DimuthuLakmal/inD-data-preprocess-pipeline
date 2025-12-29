@@ -12,7 +12,7 @@ from fvcore.nn import FlopCountAnalysis
 from src.utils.metrics import compute_metrics
 
 
-def evaluate(model, valid_data_loader, device, writer=None, epoch=0):
+def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False):
     # Loading background images
     background_images = {}
     for scene_id in [0, 7, 8, 18, 19]:
@@ -122,18 +122,22 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0):
             #
             #             cv2.imwrite(f'../results/edge_masks/{batch_idx}_{b_i}_{h}.png', map_img_t)
 
-
     valid_loss = v_total["loss"] / batch_itr
-    writer.add_scalar("val/loss_epoch", valid_loss, epoch)
-    writer.add_scalar("val/accuracy_epoch", v_total["accuracy"] / batch_itr, epoch)
-    writer.add_scalar("val/precision_epoch", v_total["precision"] / batch_itr, epoch)
-    writer.add_scalar("val/recall_epoch", v_total["recall"] / batch_itr, epoch)
-    writer.add_scalar("val/f1_epoch", v_total["f1"] / batch_itr, epoch)
-    if len(v_roc) > 0:
-        writer.add_scalar("val/roc_auc_epoch", float(np.mean(v_roc)), epoch)
+    if not test:
+        writer.add_scalar("val/loss_epoch", valid_loss, epoch)
+        writer.add_scalar("val/accuracy_epoch", v_total["accuracy"] / batch_itr, epoch)
+        writer.add_scalar("val/precision_epoch", v_total["precision"] / batch_itr, epoch)
+        writer.add_scalar("val/recall_epoch", v_total["recall"] / batch_itr, epoch)
+        writer.add_scalar("val/f1_epoch", v_total["f1"] / batch_itr, epoch)
+        if len(v_roc) > 0:
+            writer.add_scalar("val/roc_auc_epoch", float(np.mean(v_roc)), epoch)
 
-    print(f'Epoch {epoch}, Validation Loss: {valid_loss}')
-    logging.info(f'Epoch {epoch}, Validation Loss: {valid_loss}')
+        print(f'Epoch {epoch}, Validation Loss: {valid_loss}')
+        logging.info(f'Epoch {epoch}, Validation Loss: {valid_loss}')
+    else:
+        print(f'Test Loss: {valid_loss}, Accuracy: {v_total["accuracy"] / batch_itr}, Precision: {v_total["precision"] / batch_itr}, '
+              f'Recall: {v_total["recall"] / batch_itr}, F1: {v_total["f1"] / batch_itr}, '
+              f'ROC AUC: {float(np.mean(v_roc)) if len(v_roc) > 0 else "N/A"}')
 
     return valid_loss
 

@@ -22,8 +22,6 @@ from loguru import logger
 import pandas as pd
 import pickle
 
-from utils.view_data import draw_circle
-
 
 class OGMDataset(Dataset):
     """Face Landmarks dataset."""
@@ -53,7 +51,7 @@ class OGMDataset(Dataset):
         self.class_dict = {'car': 0, 'truck_bus': 1, 'bicycle': 2, 'pedestrian': 3}
 
         start_scene = 0
-        end_scene = 19
+        end_scene = 23
         filename = "data.pkl"
 
         self.data_dict = {}
@@ -66,7 +64,7 @@ class OGMDataset(Dataset):
 
             # Loading background images
             for scene_id in scene_ids:
-                if int(scene_id) < start_scene or int(scene_id) > end_scene:
+                if int(scene_id) < start_scene or int(scene_id) >= end_scene:
                     continue
 
                 # Store background images for scenes
@@ -163,7 +161,7 @@ class OGMDataset(Dataset):
         else:
             for scene_id in scene_ids:
 
-                if int(scene_id) < start_scene or int(scene_id) > end_scene:
+                if int(scene_id) < start_scene or int(scene_id) >= end_scene:
                     continue
 
                 tracks_file = os.path.join(self.input_path, f"{scene_id}_tracks.csv")
@@ -221,7 +219,7 @@ class OGMDataset(Dataset):
 
             for scene_id in scene_ids:
                 scene_id = int(scene_id)
-                if scene_id < start_scene or scene_id > end_scene:
+                if scene_id < start_scene or scene_id >= end_scene:
                     continue
 
                 tracks_meta = self.tracks_meta[(self.tracks_meta["recordingId"] == scene_id)]

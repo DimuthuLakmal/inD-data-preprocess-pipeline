@@ -61,7 +61,7 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False)
 
             loss_aggregated = loss_fn_aggregated(outputs, targets)
             loss_aggregated = loss_aggregated * mask
-            scene_wise_loss = list(loss_aggregated.detach().cpu().numpy())
+            # scene_wise_loss = list(loss_aggregated.detach().cpu().numpy())
             loss_avg = loss_aggregated.sum() / (mask.sum().clamp_min(1))
 
             v_total["loss"] += loss_avg.item()
@@ -73,7 +73,7 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False)
 
             batch_itr += 1
 
-            scene_data = [(arr[0], scene_loss) for (arr, scene_loss) in zip(list(inputs["scene_id"].detach().cpu().numpy()), scene_wise_loss)]
+            # scene_data = [(arr[0], scene_loss) for (arr, scene_loss) in zip(list(inputs["scene_id"].detach().cpu().numpy()), scene_wise_loss)]
 
             # Check sparse edge cases
             # cell_obs = inputs['hidden_ogm_cells']

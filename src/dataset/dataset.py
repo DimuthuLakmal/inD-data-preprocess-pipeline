@@ -121,10 +121,27 @@ class OGMDataset(Dataset):
 
             self.label_dict = label_dict
 
-            keys = list(label_dict.keys()) # These are the frame keys selected for training/testing
+            keys = list(label_dict.keys())  # These are the frame keys selected for training/testing
             for key in keys:
                 data_dict = self.data_dict[key]
                 ogm_cells, ogm_cells_xys = label_dict[key]
+
+                # check how many adjacent agents are there
+                historical_adjacent_obs = data_dict["historical_adjacent_obs"]
+                num_adjacent_agents = len(historical_adjacent_obs.keys())
+
+                # if there are less than 5 adjacent agents, remove that entry from label dict and data dict
+                # Find moving agents
+                historical_obs = np.array((list(historical_adjacent_obs.values())))
+                speeds_x = historical_obs[:, :, 3]  # Assuming speed in x is at index 3
+                speeds_y = historical_obs[:, :, 4]  # Assuming speed in y is at index 4
+                # if any agent has non-zero speed at any time step, consider it moving
+                moving_agents = np.where(np.any((speeds_x != 0) | (speeds_y != 0), axis=1))[0]
+                num_moving_agents = len(moving_agents)
+
+                # if num_moving_agents < 7:
+                #     del self.label_dict[key]
+                #     continue
 
                 if key in random_positive_keys:
                     positive_indices = []

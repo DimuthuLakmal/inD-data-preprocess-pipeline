@@ -3,7 +3,7 @@ model:
   lr: 0.0005 # learning rate
   use_lr_scheduler: True # if you want to use learning rate scheduler
   train_batch_size: 4
-  test_batch_size: 8
+  test_batch_size: 4
   train_epochs: 150
   model_output_path: "../results/checkpoints/epoch_{}.pt"
   load_saved_model: False # if you want pre-trained model weights to be loaded

@@ -342,9 +342,9 @@ background_images = {}
 fixed_blocks_info = {}
 frame_to_track_idxs = {}
 
-start_scene = 23
-end_scene = 24
-filename = "index_map22.pkl"
+start_scene = 15
+end_scene = 16
+filename = "index_map23.pkl"
 
 data_dict_all = {}
 
@@ -378,7 +378,7 @@ for idx in range(len(keys)):
     if skip_until_scene_id != -1 and scene_id < skip_until_scene_id:
         continue
 
-    skip_until_frame = -1
+    skip_until_frame = 9040
     if skip_until_frame != -1 and current_frame < skip_until_frame:
         continue
 

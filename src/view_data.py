@@ -342,9 +342,9 @@ background_images = {}
 fixed_blocks_info = {}
 frame_to_track_idxs = {}
 
-start_scene = 14
-end_scene = 15
-filename = "index_map21.pkl"
+start_scene = 23
+end_scene = 24
+filename = "index_map22.pkl"
 
 data_dict_all = {}
 
@@ -374,7 +374,7 @@ for idx in range(len(keys)):
     current_frame = int(key_elements[1])
     ego_vehicle_track_idx = int(key_elements[2])
 
-    skip_until_scene_id = 14
+    skip_until_scene_id = 15
     if skip_until_scene_id != -1 and scene_id < skip_until_scene_id:
         continue
 

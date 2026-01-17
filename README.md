@@ -50,6 +50,13 @@ Here, we provide source code in Python these three main tasks.
     history_length specifies the number of past frames to include in the observation data.
     start_frame specifies the frame number to start the annotation from.
 
+## Annotation Tool Instructions
+Use save button to save the annotations to a file named `<recording_id>_<frame>_<ego_vehicle_id>.json` in the current directory.
+
+Use clear button to clear all annotations for the current scene.
+
+Use next button to jump to the next scene.
+
  | Keyboard Shortcut | Description |
 |-------------------| --- |
 | right arrow/ D    | Jump to next frame |

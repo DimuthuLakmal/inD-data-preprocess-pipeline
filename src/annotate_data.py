@@ -1,3 +1,5 @@
+import argparse
+
 import cv2
 import numpy as np
 from pathlib import Path
@@ -8,10 +10,8 @@ import json
 from loguru import logger
 import pickle
 
-import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.widgets import Button
 from shapely.geometry import Polygon as ShapelyPolygon
@@ -323,113 +323,142 @@ def interactive_playback(frames, omg_cells, visibilities, labels, map_shape, on_
     return {"saved_clicks": saved_clicks, "last_selection": _collect_selected_payload()}
 
 
-scene_ids = set()
-for fname in os.listdir("../data"):
-    match = re.match(r"(\d+)_.*\.csv", fname)
-    if match:
-        scene_ids.add(match.group(1))
+def create_args():
+    cs = argparse.ArgumentParser(description="Dataset Tracks Visualizer")
+    # --- Input ---
+    cs.add_argument('--dataset_dir', default="../data/",
+                    help="Path to directory that contains the dataset csv files.", type=str)
+    cs.add_argument('--history_length', default="20",
+                    help="Number of previous timesetps that includes in the historical observations of a data entry",
+                    type=int)
+    cs.add_argument('--start_recording_id', default=0,
+                    help="Starting recording id that visibility data extraction starts from", type=int)
+    cs.add_argument('--end_recording_id', default=32,
+                    help="Final recording id that visibility data extraction ends from", type=int)
+    cs.add_argument('--start_frame', default=0,
+                    help="Start each record from this frame", type=int)
+    cs.add_argument('--observation_data_file', default="data.pkl",
+                    help="File that stores derived observed trajectory and ogm data", type=str)
 
-scene_ids = sorted(scene_ids)
-print(f"Found scenes: {scene_ids}")
+    return vars(cs.parse_args())
 
-input_path = "../data"
-output_path = "../data/annotations"
 
-tracks = []
-tracks_meta = []
-visibility_data = []
-background_images = {}
-fixed_blocks_info = {}
-frame_to_track_idxs = {}
+if __name__ == '__main__':
+    config = create_args()
 
-start_scene = 24
-end_scene = 25
-filename = "index_map24.pkl"
+    scene_ids = set()
+    for fname in os.listdir("../data"):
+        match = re.match(r"(\d+)_.*\.csv", fname)
+        if match:
+            scene_ids.add(match.group(1))
 
-data_dict_all = {}
+    scene_ids = sorted(scene_ids)
+    print(f"Found scenes: {scene_ids}")
 
-# Check data file exists
-index_file_path = Path(os.path.join(input_path, filename))
-if index_file_path.exists():
-    logger.info("Loading index map from {}", index_file_path)
-    data_dict_all = pickle.load(open(index_file_path, "rb"))
+    input_path = config["dataset_dir"]
+    output_path = os.path.join(input_path, "annotations")
 
-    # Loading background images
-    for scene_id in scene_ids:
-        if int(scene_id) < start_scene or int(scene_id) >= end_scene:
+    # create output directory if not exists
+    os.makedirs(output_path, exist_ok=True)
+
+    tracks = []
+    tracks_meta = []
+    visibility_data = []
+    background_images = {}
+    fixed_blocks_info = {}
+    frame_to_track_idxs = {}
+
+    start_scene = config["start_recording_id"]
+    end_scene = config["end_recording_id"]
+    filename = config["observation_data_file"]
+
+    data_dict_all = {}
+
+    # Check data file exists
+    index_file_path = Path(os.path.join(input_path, filename))
+    if index_file_path.exists():
+        logger.info("Loading index map from {}", index_file_path)
+        data_dict_all = pickle.load(open(index_file_path, "rb"))
+
+        # Loading background images
+        for scene_id in scene_ids:
+            if int(scene_id) < start_scene or int(scene_id) > end_scene:
+                continue
+
+            # Store background images for scenes
+            bg_path = os.path.join(input_path, 'semantic_maps', f"{scene_id}_background.png")
+            img = cv2.imread(bg_path)
+            background_images[int(scene_id)] = img
+
+    keys = list(data_dict_all.keys())
+    print("Done Loading")
+
+    for idx in range(len(keys)):
+        key = keys[idx]
+        key_elements = key.split("_")
+        scene_id = int(key_elements[0])
+        current_frame = int(key_elements[1])
+        ego_vehicle_track_idx = int(key_elements[2])
+
+        skip_until_scene_id = start_scene
+        if skip_until_scene_id != -1 and scene_id < skip_until_scene_id:
             continue
 
-        # Store background images for scenes
-        bg_path = os.path.join(input_path, 'semantic_maps', f"{scene_id}_background.png")
-        img = cv2.imread(bg_path)
-        background_images[int(scene_id)] = img
+        skip_until_frame = config["start_frame"]
+        if skip_until_frame != -1 and current_frame < skip_until_frame:
+            continue
 
-keys = list(data_dict_all.keys())
-print("Done Loading")
+        data_dict = data_dict_all[key]
 
-for idx in range(len(keys)):
-    key = keys[idx]
-    key_elements = key.split("_")
-    scene_id = int(key_elements[0])
-    current_frame = int(key_elements[1])
-    ego_vehicle_track_idx = int(key_elements[2])
+        # map
+        backgrond_img = background_images[scene_id]
 
-    skip_until_scene_id = 24
-    if skip_until_scene_id != -1 and scene_id < skip_until_scene_id:
-        continue
+        # Historical observations
+        historical_adjacent_obs, historical_ego_obs = data_dict["historical_adjacent_obs"], data_dict[
+            "historical_ego_obs"]
+        hidden_ogm_cells = data_dict["hidden_ogm_cells"]
+        hidden_tracks_pts = data_dict["hidden_tracks_pts"]
+        hidden_tracks_id_ogm_data = data_dict["hidden_tracks_id_ogm"]
+        omg_cells_coords = np.array(data_dict["cell_coords"])
+        ogm_cell_label_data = data_dict["ogm_gt"].reshape(-1)
+        ogm_cell_visibility_data = data_dict["ogm"].reshape(-1)
 
-    skip_until_frame = -1
-    if skip_until_frame != -1 and current_frame < skip_until_frame:
-        continue
+        num_timesteps = config["history_length"] + 1
 
-    data_dict = data_dict_all[key]
-
-    # map
-    backgrond_img = background_images[scene_id]
-
-    # Historical observations
-    historical_adjacent_obs, historical_ego_obs = data_dict["historical_adjacent_obs"], data_dict["historical_ego_obs"]
-    hidden_ogm_cells = data_dict["hidden_ogm_cells"]
-    hidden_tracks_pts = data_dict["hidden_tracks_pts"]
-    hidden_tracks_id_ogm_data = data_dict["hidden_tracks_id_ogm"]
-    omg_cells_coords = np.array(data_dict["cell_coords"])
-    ogm_cell_label_data = data_dict["ogm_gt"].reshape(-1)
-    ogm_cell_visibility_data = data_dict["ogm"].reshape(-1)
-
-    num_timesteps = 21
-
-    frames = []
-    for t in range(num_timesteps):
-        if t != num_timesteps - 1:
-            frames.append(draw_frame(backgrond_img, historical_adjacent_obs.values(), historical_ego_obs, None,
-                                     t, num_timesteps))
-        if t == num_timesteps - 1:
-            frames.append(draw_frame(backgrond_img, historical_adjacent_obs.values(), historical_ego_obs,
-                                     hidden_tracks_pts, t, num_timesteps))
-
-    def save_callback(payload):
-        file_path = os.path.join(output_path, f"{key}.json")
-
-        brief = [{"index": d["index"], "cx": d["centroid"][0], "cy": d["centroid"][1], "label": d["label"], "track_ids":  d["track_ids"]} for d in payload]
-        with open(file_path, "w") as f:
-            json.dump(brief, f, indent=2)
-
-        print(brief)
+        frames = []
+        for t in range(num_timesteps):
+            if t != num_timesteps - 1:
+                frames.append(draw_frame(backgrond_img, historical_adjacent_obs.values(), historical_ego_obs, None,
+                                         t, num_timesteps))
+            if t == num_timesteps - 1:
+                frames.append(draw_frame(backgrond_img, historical_adjacent_obs.values(), historical_ego_obs,
+                                         hidden_tracks_pts, t, num_timesteps))
 
 
-    result = interactive_playback(
-        frames,
-        omg_cells_coords,
-        ogm_cell_visibility_data,
-        ogm_cell_label_data,
-        backgrond_img.shape,
-        on_save=save_callback,
-        key=key,
-        hidden_tracks_id_ogm_data=hidden_tracks_id_ogm_data,
-    )
+        def save_callback(payload):
+            file_path = os.path.join(output_path, f"{key}.json")
 
-    # When the window is closed, you still get everything:
-    print("All saves:", len(result["saved_clicks"]))
-    print("Selection at close:", len(result["last_selection"]))
+            brief = [{"index": d["index"], "cx": d["centroid"][0], "cy": d["centroid"][1], "label": d["label"],
+                      "track_ids": d["track_ids"]} for d in payload]
+            with open(file_path, "w") as f:
+                json.dump(brief, f, indent=2)
+
+            print(brief)
+
+
+        result = interactive_playback(
+            frames,
+            omg_cells_coords,
+            ogm_cell_visibility_data,
+            ogm_cell_label_data,
+            backgrond_img.shape,
+            on_save=save_callback,
+            key=key,
+            hidden_tracks_id_ogm_data=hidden_tracks_id_ogm_data,
+        )
+
+        # When the window is closed, you still get everything:
+        print("All saves:", len(result["saved_clicks"]))
+        print("Selection at close:", len(result["last_selection"]))
 
 

@@ -11,38 +11,33 @@ model:
   log_file: "../results/app_{}.log" # pretrained model path
   tb_log_dir: "../results/runs/" # tensorboard log dir
   device: cpu # decides GPU or CPU for training
-  graph_weight_encoder:
-    dim_model: 64 # dimension that embedding layer maps the input of the model to.
+  obs_temporal_encoder: # observation temporal encoder
+    dim_model: 32 # dimension that embedding layer maps the input of the model to.
     seq_len: 21 # input sequence length
-    input_dim: 9 # input dimension, inputs is traffic flow value, in some dataset it may be combined with time index
+    input_dim: 10 # input dimension
     num_layers: 4 # # of temporal encoder layers
-    num_heads: 8 # # of temporal encoder layers
-    dropout_e_normal: 0.0 # dropout applied to the final output of temporal encoder layer of the first encoder
-    dropout_e_rep: 0.2 # dropout applied to the final output of temporal encoder layer of the second encoder (representative time sequence)
-  temporal_encoder:
-    dim_model: 64 # dimension that embedding layer maps the input of the model to.
+    num_heads: 4 # # of temporal encoder layers
+    dropout: 0.0 # dropout applied to the final output of temporal encoder layer
+  z_temporal_encoder: # masking input's temporal encoder. We could also use the same encoder for obs_temporal_encoder
+    dim_model: 32 # dimension that embedding layer maps the input of the model to.
     seq_len: 21 # input sequence length
-    input_dim: 9 # input dimension, inputs is traffic flow value, in some dataset it may be combined with time index
+    input_dim: 10 # input dimension
     num_layers: 4 # # of temporal encoder layers
-    num_heads: 8 # # of temporal encoder layers
-    dropout_e_normal: 0.0 # dropout applied to the final output of temporal encoder layer of the first encoder
-    dropout_e_rep: 0.2 # dropout applied to the final output of temporal encoder layer of the second encoder (representative time sequence)
+    num_heads: 4 # # of temporal encoder layers
+    dropout: 0.0 # dropout applied to the final output of temporal encoder layer
   gat:
-    ogm_input_dim: 2
-    dim_model: 32
-    dim_cell_model: 16
-    dim_adj_model: 32
-    dim_edge: 1
+    ogm_input_dim: 2 # input dimension of the occupancy grid map cells
+    dim_model: 32 # dimension that embedding layer maps the input of the model to.
+    dim_cell_model: 16 # dimension that embedding layer maps each cell of the ogm
+    dim_obs_model: 32 # dimension that embedding layer maps the latent observation output from temporal encoder
+    dim_edge: 1 # edge feature dimension
     num_heads: 4
     dropout: 0.2
-  unet:
-    ogm_input_dim: 2
-    dim_model: 16
-    dim_edge: 1
-    num_heads: 4
-    dropout: 0.2
-    img_ch: 4
-    output_ch: 4
+  map_encoder:
+    dim_model: 64
+    pooling: 'avg'
+    pretrained: True
+    architecture: 'resnet50'
 
 # Data Configs
 data:
@@ -53,3 +48,6 @@ data:
   history_length: 20
   num_features: 9 # number of features of the input data
   num_workers: 1 # number of workers for data loading
+  start_scene: 0
+  end_scene: 24
+  observation_data_filename: "data.pkl"

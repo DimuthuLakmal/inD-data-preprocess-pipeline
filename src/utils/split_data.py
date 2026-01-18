@@ -1,8 +1,13 @@
+'''
+This script splits JSON annotation files into training, validation, and test sets.
+'''
+
 import os
 import shutil
 import random
 
 # Paths
+# This is hard coded. Adjust as necessary.
 source_dir = "../../data/annotations"
 train_dir = "../../data/annotations/train"
 val_dir = "../../data/annotations/validation"
@@ -15,10 +20,6 @@ os.makedirs(test_dir, exist_ok=True)
 
 # Get all JSON files
 all_files = [f for f in os.listdir(source_dir) if f.endswith(".json")]
-
-# # check if files belongs to the following set of scenes
-# scenes = [0, 1, 2, 3, 4, 5, 6]
-# all_files = [f for f in all_files if int(f.split('_')[0]) in scenes]
 
 # Shuffle and split
 random.shuffle(all_files)

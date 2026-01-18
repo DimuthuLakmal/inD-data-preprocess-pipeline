@@ -1,15 +1,22 @@
+'''
+GAT uses two layers of message passing between bi-partite graph nodes representing conventional attention calculation
+and binary mask learning. Nodes also has two types of embeddings, one for conventional attention calculation and one for
+binary mask learning. You can esstientially view this as two parallel GATs with same graph structure
+but different node embeddings, learning to do different tasks.
+'''
+
 import torch
 from torch import nn
 
 from src.models.gat.gat import GATv2Conv
-from src.models.transformer.cell_query_emb import CellQueryEmb
+from src.models.gat.cell_query_emb import CellQueryEmb
 
 
 class GATLayer(nn.Module):
     def __init__(self, config):
         super(GATLayer, self).__init__()
 
-        dim_adj_model = config['dim_adj_model']
+        dim_adj_model = config['dim_obs_model']
         dim_cell_model = config['dim_cell_model']
         dim_model = config['dim_model']
         dim_edge = config['dim_edge']
@@ -22,6 +29,7 @@ class GATLayer(nn.Module):
                              edge_dim=dim_edge,
                              add_self_loops=False)
 
+        # it uses two separate MLPs to embed the cell queries for x_te and x_te_z
         self.cell_emb = CellQueryEmb(d_model=dim_cell_model, mode="mlp")
         self.cell_emb_z = CellQueryEmb(d_model=dim_cell_model, mode="mlp")
 

@@ -373,33 +373,6 @@ class GATv2Conv(MessagePassing):
         else:
             return out, self.loss, self.z
 
-    def edge_update_(self, x_j: Tensor, x_i: Tensor, edge_attr: OptTensor,
-                      index: Tensor, ptr: OptTensor,
-                      dim_size: Optional[int]) -> Tensor:
-        # an edge UDF to compute unnormalized attention values from src and dst
-        tmp = (x_i).sum(dim=-1).unsqueeze(-1) + (x_j).sum(dim=-1).unsqueeze(-1)
-        logits = tmp + self.bias_l0_z
-        # logits = x_i + x_j
-
-        if edge_attr is not None:
-            if edge_attr.dim() == 1:
-                edge_attr = edge_attr.view(-1, 1)
-            assert self.lin_edge is not None
-            edge_attr = self.lin_edge_z(edge_attr)
-            edge_attr = edge_attr.view(-1, self.heads, self.out_channels)
-            logits = logits + edge_attr.sum(dim=-1).unsqueeze(-1)
-
-        # logits = F.leaky_relu(logits, self.negative_slope)
-        # logits = (logits * self.att_z_l).sum(dim=-1)
-
-        if self.training:
-            z_raw = l0_train(logits, 0, 1).squeeze(-1)
-        else:
-            z_raw = l0_test(logits, 0, 1).squeeze(-1)
-
-        self.loss = get_loss2(logits[:, :, :]).sum()
-
-        return z_raw
 
     def edge_update_z(self, x_j: Tensor, x_i: Tensor, edge_attr: OptTensor,
                       index: Tensor, ptr: OptTensor,

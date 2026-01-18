@@ -7,9 +7,8 @@ from torch.utils.tensorboard import SummaryWriter
 import yaml
 
 from dataset.data_loader import OGMDataLoader
-from models.spatio_temporal_encoder import SGATTransformer
+from models.v_stsbgat import VSTSBGT
 import torch.nn as nn
-import cv2
 
 from src.utils.metrics import compute_metrics
 from validate import evaluate
@@ -172,7 +171,7 @@ if __name__ == '__main__':
     train_dataloader = OGMDataLoader(config['data'], phase='train').create_dataloader()
     valid_dataloader = OGMDataLoader(config['data'], phase='validation').create_dataloader()
 
-    model = SGATTransformer(config['model']).to(config['model']["device"])
+    model = VSTSBGT(config['model']).to(config['model']["device"])
     # model.load_state_dict(torch.load(config['model']['model_output_path'].format(98)))
     # model = model.to(config['model']["device"])
 

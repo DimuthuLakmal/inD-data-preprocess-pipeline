@@ -1,88 +1,77 @@
 import torch
-from torch import nn
+import math
+import torch.nn as nn
 
-from ransformer.atten_pooling import AttentionPool
-from models.transformer.encoder_block import EncoderBlock
-from models.transformer.positional_encoding import PositionalEncoder
+
+# --- Sinusoidal 1D positional encoding (time) ---
+class SinusoidalPosEnc(nn.Module):
+    def __init__(self, d_model, max_len=2048):
+        super().__init__()
+        pe = torch.zeros(max_len, d_model)  # [max_len, D]
+        pos = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(pos * div)
+        pe[:, 1::2] = torch.cos(pos * div)
+        self.register_buffer("pe", pe)  # not a parameter
+
+    def forward(self, x):
+        # x: [B*, T, D]  -> add PE for first T positions
+        T = x.size(1)
+        return x + self.pe[:T].unsqueeze(0).to(x.dtype)  # [1,T,D] + [B*,T,D]
 
 
 class TemporalEncoder(nn.Module):
-    def __init__(self, config):
-        super(TemporalEncoder, self).__init__()
+    def __init__(self, d_in, d_model=128, nhead=4, num_layers=2, dropout=0.1):
+        super().__init__()
+        self.proj_in = nn.Linear(d_in, d_model)
+        self.posenc = SinusoidalPosEnc(d_model)
 
-        self.device = config['device']
+        enc_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead,
+            dim_feedforward=4 * d_model, dropout=dropout,
+            batch_first=True, norm_first=True
+        )
+        self.encoder = nn.TransformerEncoder(enc_layer, num_layers=num_layers)
 
-        num_heads = config['num_heads']
-        num_layers = config['num_layers']
-        out_dim = config['dim_model']
-        dim_model = config['dim_model']
-        input_dim = config['input_dim']
-        seq_len = config['seq_len']
+        # One learnable CLS token shared across vehicles (expanded per sequence)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
+        nn.init.normal_(self.cls_token, mean=0.0, std=0.02)
 
-        # embedding and positional encoder
-        self.hist_emb = nn.Linear(input_dim, dim_model)
-        self.positional_encoder = PositionalEncoder(seq_len + 1, dim_model, matrix_dim=4) # for CLS token
+        self.ln_out = nn.LayerNorm(d_model)
 
-        self.cls_token = nn.Parameter(torch.randn(1, 1, 1, dim_model))
+    def forward(self, x, time_maks, veh_maks=None):
+        """
+        x: [B, N1, T, d_in]
+        time_valid: [B, N1, T]  (True=pad, False=keep). Required.
+        veh_valid:  [B, N1]     (True=keep). Optional; if given, will zero invalid outputs.
+        """
+        B, N1, T, d_in = x.shape
+        assert time_maks.shape == (B, N1, T), "time_valid must be [B,N1,T] bool"
 
-        # encoder attention blocks
-        self.layers = nn.ModuleList(
-            [EncoderBlock(
-                embed_dim=dim_model,
-                num_heads=num_heads,
-                src_dropout=.1,
-                ff_dropout=0.2,
-                expansion_factor=4,
-                mask=False
-            ) for i in range(num_layers)])
+        # Flatten vehicles into batch axis for per-vehicle temporal encoding
+        x = self.proj_in(x).view(B * N1, T, -1)  # [B*N1, T, D]
+        pad_t = time_maks.view(B * N1, T)  # True = pad (Transformer convention)
 
-        # self.conv_q_layers = nn.ModuleList(
-        #     [nn.Conv1d(in_channels=dim_model, out_channels=dim_model, kernel_size=3, stride=1, padding=1)
-        #      for _ in range(num_layers)])
-        #
-        # self.conv_k_layers = nn.ModuleList(
-        #     [nn.Conv1d(in_channels=dim_model, out_channels=dim_model, kernel_size=3, stride=1, padding=1)
-        #      for _ in range(num_layers)])
+        # Prepend CLS (not padded)
+        cls = self.cls_token.expand(B * N1, 1, -1)  # [B*N1, 1, D]
+        x = torch.cat([cls, x], dim=1)  # [B*N1, T+1, D]
 
-        self.attn_pool = AttentionPool(dim_model)
-        self.fc_out = nn.Linear(dim_model, out_dim)
+        # Build padding mask for T+1 (CLS is always valid => False)
+        cls_pad = torch.zeros(B * N1, 1, dtype=torch.bool, device=pad_t.device)
+        src_key_padding_mask = torch.cat([cls_pad, pad_t], dim=1)  # [B*N1, T+1], True=pad
 
-        self.reset_parameters()
+        # Add positional encodings (T+1 because of CLS at position 0)
+        x = self.posenc(x)
 
-    def reset_parameters(self):
-        """Reset parameters of the model."""
-        nn.init.uniform_(self.hist_emb.weight, a=-1.0, b=1.0)
-        nn.init.uniform_(self.fc_out.weight, a=-1.0, b=1.0)
-        for layer in self.layers:
-            for module in layer.modules():
-                if isinstance(module, nn.Linear):
-                    nn.init.uniform_(module.weight, a=-1.0, b=1.0)
-        # for conv_q, conv_k in zip(self.conv_q_layers, self.conv_k_layers):
-        #     torch.nn.init.xavier_uniform_(conv_q.weight)
-        #     torch.nn.init.xavier_uniform_(conv_k.weight)
+        # Encode (self-attn over time per vehicle)
+        h = self.encoder(x, src_key_padding_mask=src_key_padding_mask)  # [B*N1, T+1, D]
 
-    def forward(self, x, mask=None):
-        x_adjacent_hist = x['historical_adjacent_obs']
-        B, N, T, C = x_adjacent_hist.shape  # B, N, T, C
+        # Take CLS as per-vehicle summary
+        h_cls = h[:, 0, :]  # [B*N1, D]
+        h_veh = self.ln_out(h_cls).view(B, N1, -1)  # [B, N1, D]
 
-        x = self.hist_emb(x_adjacent_hist)
+        if veh_maks is not None:
+            assert veh_maks.shape == (B, N1)
+            h_veh = h_veh * ~veh_maks.unsqueeze(-1)
 
-        cls_tokens = self.cls_token.expand(B, N, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=2)
-
-        # Increase the mask size for CLS token
-        if mask is not None:
-            cls_mask = torch.zeros((B, N, 1), dtype=torch.bool, device=self.device)
-            mask = torch.cat((cls_mask, mask), dim=2)
-
-
-        out_e = self.positional_encoder(x)
-        out_e_shp = out_e.shape
-
-        for enc_layer in self.layers:
-            q, v, k = out_e, out_e, out_e
-            out_e = enc_layer(q, k, v, mask)
-
-        # out_e = self.attn_pool(out_e)
-
-        return out_e[:, :, 0, :]
+        return h_veh

@@ -1,3 +1,8 @@
+'''
+Custom collate function for batching data samples.
+It is required as batch of observation samples may have varying sequence lengths.
+'''
+
 import torch
 import numpy as np
 import torch.nn.functional as F

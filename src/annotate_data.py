@@ -331,9 +331,9 @@ def create_args():
     cs.add_argument('--history_length', default="20",
                     help="Number of previous timesetps that includes in the historical observations of a data entry",
                     type=int)
-    cs.add_argument('--start_recording_id', default=0,
+    cs.add_argument('--start_recording_id', default=31,
                     help="Starting recording id that visibility data extraction starts from", type=int)
-    cs.add_argument('--end_recording_id', default=32,
+    cs.add_argument('--end_recording_id', default=31,
                     help="Final recording id that visibility data extraction ends from", type=int)
     cs.add_argument('--start_frame', default=0,
                     help="Start each record from this frame", type=int)

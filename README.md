@@ -32,7 +32,7 @@ Here, we provide source code in Python these three main tasks.
    
 
 3. First, you need to execute the first task: extract visibility data for all vehicles in all frames. You can also download the pre-extracted visibility data from our dataset and place them in the data folder if you want to skip this step.
-   Download Link: https://www.dropbox.com/scl/fi/fjpzwku295059btpyltd5/visibilityData.zip?rlkey=tokw0m7207ibmwv2pzc4yi20r&st=jh7zzuq1&dl=0 . You can do this by running the following command from the `src` directory:
+   Download Link: TO_BE_PUBLISHED . You can do this by running the following command from the `src` directory:
    ```shell
    python3 src/visibility_extraction.py --dataset_dir /<path/to>/inD-dataset-v1.0/data/ --start_recording_id 0 --end_recording_id 32
    ```

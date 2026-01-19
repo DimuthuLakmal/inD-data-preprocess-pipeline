@@ -20,12 +20,12 @@ def compute_metrics(outputs_sig, targets, mask, threshold=0.5):
     tp, fp, fn, tn = [x.item() for x in (tp, fp, fn, tn)]
     precision = tp / (tp + fp + 1e-8)
     recall    = tp / (tp + fn + 1e-8)
+    specificity = tn / (tn + fp + 1e-8)
     f1        = 2 * precision * recall / (precision + recall + 1e-8)
     acc       = (tp + tn) / (tp + tn + fp + fn + 1e-8)
 
     roc_auc = None
     if _HAS_SK:
-        # Only feed valid (mask==1) positions to ROC-AUC
         m = mask.flatten().bool()
         y_true = labels[m].detach().cpu().numpy()
         y_prob = probs[m].detach().cpu().numpy()
@@ -35,7 +35,8 @@ def compute_metrics(outputs_sig, targets, mask, threshold=0.5):
     return {
         "accuracy": float(acc),
         "precision": float(precision),
-        "recall": float(recall),
+        "recall": float(recall),  # TPR
+        "acc_free": float(specificity),  # TNR (negative accuracy)
         "f1": float(f1),
         "roc_auc": roc_auc
     }

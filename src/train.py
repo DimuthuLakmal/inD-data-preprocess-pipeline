@@ -59,7 +59,7 @@ def train(model, train_data_loader, valid_data_loader, config):
         model.train()
 
         total_loss = 0.0
-        total_metrics = {"accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1": 0.0}
+        total_metrics = {"accuracy": 0.0, "precision": 0.0, "recall": 0.0, "acc_free": 0.0, "f1": 0.0}
         roc_count = 0  # count batches where ROC was computable
         batch_itr = 0
 
@@ -96,6 +96,7 @@ def train(model, train_data_loader, valid_data_loader, config):
                 total_metrics["accuracy"] += m["accuracy"]
                 total_metrics["precision"] += m["precision"]
                 total_metrics["recall"] += m["recall"]
+                total_metrics["acc_free"] += m["acc_free"]
                 total_metrics["f1"] += m["f1"]
                 if m["roc_auc"] is not None:
                     # Log batch ROC when available
@@ -129,12 +130,13 @@ def train(model, train_data_loader, valid_data_loader, config):
         print(f'Epoch {epoch}, Training Loss: {train_loss}')
         logging.info(f'Epoch {epoch}, Training Loss: {train_loss}, '
                      f'Acc: {avg_metrics["accuracy"]}, P: {avg_metrics["precision"]}, '
-                     f'R: {avg_metrics["recall"]}, F1: {avg_metrics["f1"]}')
+                     f'R: {avg_metrics["recall"]}, R: {avg_metrics["acc_free"]}, F1: {avg_metrics["f1"]}')
 
         writer.add_scalar("train/loss_epoch", train_loss, epoch)
         writer.add_scalar("train/accuracy_epoch", avg_metrics["accuracy"], epoch)
         writer.add_scalar("train/precision_epoch", avg_metrics["precision"], epoch)
         writer.add_scalar("train/recall_epoch", avg_metrics["recall"], epoch)
+        writer.add_scalar("train/acc_free_epoch", avg_metrics["acc_free"], epoch)
         writer.add_scalar("train/f1_epoch", avg_metrics["f1"], epoch)
 
         # Validate the model

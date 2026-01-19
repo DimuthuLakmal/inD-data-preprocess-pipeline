@@ -28,7 +28,7 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False)
     with torch.no_grad():  # Example: 10 epochs
 
         total_loss = 0.0
-        v_total = {"loss": 0.0, "accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1": 0.0}
+        v_total = {"loss": 0.0, "accuracy": 0.0, "precision": 0.0, "recall": 0.0, "acc_free": 0.0, "f1": 0.0}
         v_batches = 0
         v_roc = []
         batch_itr = 0
@@ -66,7 +66,7 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False)
 
             v_total["loss"] += loss_avg.item()
             m = compute_metrics(outputs_sig, targets, mask)
-            for k in ("accuracy", "precision", "recall", "f1"):
+            for k in ("accuracy", "precision", "recall", "f1", "acc_free"):
                 v_total[k] += m[k]
             if m["roc_auc"] is not None:
                 v_roc.append(m["roc_auc"])
@@ -128,6 +128,7 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False)
         writer.add_scalar("val/accuracy_epoch", v_total["accuracy"] / batch_itr, epoch)
         writer.add_scalar("val/precision_epoch", v_total["precision"] / batch_itr, epoch)
         writer.add_scalar("val/recall_epoch", v_total["recall"] / batch_itr, epoch)
+        writer.add_scalar("val/acc_free_epoch", v_total["acc_free"] / batch_itr, epoch)
         writer.add_scalar("val/f1_epoch", v_total["f1"] / batch_itr, epoch)
         if len(v_roc) > 0:
             writer.add_scalar("val/roc_auc_epoch", float(np.mean(v_roc)), epoch)
@@ -136,7 +137,7 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False)
         logging.info(f'Epoch {epoch}, Validation Loss: {valid_loss}')
     else:
         print(f'Test Loss: {valid_loss}, Accuracy: {v_total["accuracy"] / batch_itr}, Precision: {v_total["precision"] / batch_itr}, '
-              f'Recall: {v_total["recall"] / batch_itr}, F1: {v_total["f1"] / batch_itr}, '
+              f'Recall: {v_total["recall"] / batch_itr}, Accuracy Free: {v_total["acc_free"] / batch_itr} F1: {v_total["f1"] / batch_itr}, '
               f'ROC AUC: {float(np.mean(v_roc)) if len(v_roc) > 0 else "N/A"}')
 
     return valid_loss

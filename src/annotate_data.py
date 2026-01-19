@@ -390,6 +390,10 @@ if __name__ == '__main__':
             img = cv2.imread(bg_path)
             background_images[int(scene_id)] = img
 
+    else:
+        logger.error("Data file {} does not exist!", index_file_path)
+        exit(1)
+
     keys = list(data_dict_all.keys())
     print("Done Loading")
 

@@ -113,16 +113,18 @@ class OGMDataset(Dataset):
                 last_t = np.where(mask)[0].max() if np.any(mask) else None
                 last_recorded_t[veh_index] = last_t
 
-            # Extract distances for hidden ogm cells from adjacent tracks (This is a bi-partition graph)
-            edge_weights, edge_index = self._extract_edge_info(historical_adjacent_obs, ogm_cells,
-                                                               last_recorded_t)
 
             for i, (cell, cell_xyz) in enumerate(zip(ogm_cells, ogm_cells_xys)):
                 data_dict[key + "_" + str(i)] = deepcopy(obs_data_dict)
+                cell_arr = [cell]
+                cell_xyz_arr = [cell_xyz]
+                # Extract distances for hidden ogm cells from adjacent tracks (This is a bi-partition graph)
+                edge_weights, edge_index = self._extract_edge_info(historical_adjacent_obs, cell_arr, last_recorded_t)
+
                 data_dict[key + "_" + str(i)]["edge_weights"] = edge_weights
                 data_dict[key + "_" + str(i)]["edge_index"] = edge_index
-                data_dict[key + "_" + str(i)]["hidden_ogm_cells"] = np.array(cell, dtype=np.float32)
-                data_dict[key + "_" + str(i)]["hidden_cell_polygon_xys"] = np.array(cell_xyz, dtype=np.float32)
+                data_dict[key + "_" + str(i)]["hidden_ogm_cells"] = np.array(cell_arr, dtype=np.float32)
+                data_dict[key + "_" + str(i)]["hidden_cell_polygon_xys"] = np.array(cell_xyz_arr, dtype=np.float32)
 
         self.data_dict = data_dict
 

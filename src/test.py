@@ -4,7 +4,7 @@ import torch
 import yaml
 
 from dataset.data_loader import OGMDataLoader
-from models.spatio_temporal_encoder import SGATTransformer
+from models.v_stsbgat import VSTSBGT
 from validate import evaluate
 
 import torch.nn as nn
@@ -34,8 +34,8 @@ if __name__ == '__main__':
 
     valid_dataloader = OGMDataLoader(config['data'], phase='test').create_dataloader()
 
-    model = SGATTransformer(config['model']).to(config['model']["device"])
-    model.load_state_dict(torch.load(config['model']['model_output_path'].format(89)))  # 144 for full model
+    model = VSTSBGT(config['model']).to(config['model']["device"])
+    model.load_state_dict(torch.load(config['model']['model_output_path'].format(94)))  # 144 for full model
     model = model.to(config['model']["device"])
 
     test_loss = evaluate(model, valid_dataloader, config['model']["device"], test=True)

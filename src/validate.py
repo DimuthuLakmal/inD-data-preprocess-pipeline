@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import cv2
 from fvcore.nn import FlopCountAnalysis
+import time
 
 from src.utils.metrics import compute_metrics
 
@@ -24,6 +25,8 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False)
     model.eval()
 
     loss_fn_aggregated = nn.BCEWithLogitsLoss(reduction='none')
+
+    times = []
 
     with torch.no_grad():  # Example: 10 epochs
 
@@ -47,7 +50,13 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False)
                     targets != 3).squeeze()  # Cells occupied with fixed blocks are marked with a 3 in the target
             mask = mask * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not padded
 
+            start_time = time.time()
             outputs, gates, l2_loss, z_masks = model(inputs)
+            end_time = time.time()
+
+            # print(f'Inference Time for batch {batch_idx}: {(end_time - start_time) * 1000} ms')
+            times.append((end_time - start_time) * 1000)
+
             outputs = outputs.squeeze()
             outputs_sig = nn.Sigmoid()(outputs)
 
@@ -123,6 +132,9 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False)
             #             cv2.imwrite(f'../results/edge_masks/{batch_idx}_{b_i}_{h}.png', map_img_t)
 
     valid_loss = v_total["loss"] / batch_itr
+
+    print(f'Average Inference Time per batch: {np.mean(times)} ms, Std Dev: {np.std(times)} ms')
+
     if not test:
         writer.add_scalar("val/loss_epoch", valid_loss, epoch)
         writer.add_scalar("val/accuracy_epoch", v_total["accuracy"] / batch_itr, epoch)

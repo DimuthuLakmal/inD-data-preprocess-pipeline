@@ -10,7 +10,7 @@ model:
   model_input_path: "output/model/pems08/epoch_58_model.pt" # pretrained model path
   log_file: "../results/app_{}.log" # pretrained model path
   tb_log_dir: "../results/runs/" # tensorboard log dir
-  device: cpu # decides GPU or CPU for training
+  device: cuda # decides GPU or CPU for training
   obs_temporal_encoder: # observation temporal encoder
     dim_model: 32 # dimension that embedding layer maps the input of the model to.
     seq_len: 21 # input sequence length
@@ -31,7 +31,7 @@ model:
     dim_cell_model: 16 # dimension that embedding layer maps each cell of the ogm
     dim_obs_model: 32 # dimension that embedding layer maps the latent observation output from temporal encoder
     dim_edge: 1 # edge feature dimension
-    num_heads: 4
+    num_heads: 2
     dropout: 0.2
   map_encoder:
     dim_model: 64

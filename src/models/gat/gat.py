@@ -34,105 +34,6 @@ else:
 
 
 class GATv2Conv(MessagePassing):
-    r"""The GATv2 operator from the `"How Attentive are Graph Attention
-    Networks?" <https://arxiv.org/abs/2105.14491>`_ paper, which fixes the
-    static attention problem of the standard
-    :class:`~torch_geometric.conv.GATConv` layer.
-    Since the linear layers in the standard GAT are applied right after each
-    other, the ranking of attended nodes is unconditioned on the query node.
-    In contrast, in :class:`GATv2`, every node can attend to any other node.
-
-    .. math::
-        \mathbf{x}^{\prime}_i = \sum_{j \in \mathcal{N}(i) \cup \{ i \}}
-        \alpha_{i,j}\mathbf{\Theta}_{t}\mathbf{x}_{j},
-
-    where the attention coefficients :math:`\alpha_{i,j}` are computed as
-
-    .. math::
-        \alpha_{i,j} =
-        \frac{
-        \exp\left(\mathbf{a}^{\top}\mathrm{LeakyReLU}\left(
-        \mathbf{\Theta}_{s} \mathbf{x}_i + \mathbf{\Theta}_{t} \mathbf{x}_j
-        \right)\right)}
-        {\sum_{k \in \mathcal{N}(i) \cup \{ i \}}
-        \exp\left(\mathbf{a}^{\top}\mathrm{LeakyReLU}\left(
-        \mathbf{\Theta}_{s} \mathbf{x}_i + \mathbf{\Theta}_{t} \mathbf{x}_k
-        \right)\right)}.
-
-    If the graph has multi-dimensional edge features :math:`\mathbf{e}_{i,j}`,
-    the attention coefficients :math:`\alpha_{i,j}` are computed as
-
-    .. math::
-        \alpha_{i,j} =
-        \frac{
-        \exp\left(\mathbf{a}^{\top}\mathrm{LeakyReLU}\left(
-        \mathbf{\Theta}_{s} \mathbf{x}_i
-        + \mathbf{\Theta}_{t} \mathbf{x}_j
-        + \mathbf{\Theta}_{e} \mathbf{e}_{i,j}
-        \right)\right)}
-        {\sum_{k \in \mathcal{N}(i) \cup \{ i \}}
-        \exp\left(\mathbf{a}^{\top}\mathrm{LeakyReLU}\left(
-        \mathbf{\Theta}_{s} \mathbf{x}_i
-        + \mathbf{\Theta}_{t} \mathbf{x}_k
-        + \mathbf{\Theta}_{e} \mathbf{e}_{i,k}]
-        \right)\right)}.
-
-    Args:
-        in_channels (int or tuple): Size of each input sample, or :obj:`-1` to
-            derive the size from the first input(s) to the forward method.
-            A tuple corresponds to the sizes of source and target
-            dimensionalities in case of a bipartite graph.
-        out_channels (int): Size of each output sample.
-        heads (int, optional): Number of multi-head-attentions.
-            (default: :obj:`1`)
-        concat (bool, optional): If set to :obj:`False`, the multi-head
-            attentions are averaged instead of concatenated.
-            (default: :obj:`True`)
-        negative_slope (float, optional): LeakyReLU angle of the negative
-            slope. (default: :obj:`0.2`)
-        dropout (float, optional): Dropout probability of the normalized
-            attention coefficients which exposes each node to a stochastically
-            sampled neighborhood during training. (default: :obj:`0`)
-        add_self_loops (bool, optional): If set to :obj:`False`, will not add
-            self-loops to the input graph. (default: :obj:`True`)
-        edge_dim (int, optional): Edge feature dimensionality (in case
-            there are any). (default: :obj:`None`)
-        fill_value (float or torch.Tensor or str, optional): The way to
-            generate edge features of self-loops
-            (in case :obj:`edge_dim != None`).
-            If given as :obj:`float` or :class:`torch.Tensor`, edge features of
-            self-loops will be directly given by :obj:`fill_value`.
-            If given as :obj:`str`, edge features of self-loops are computed by
-            aggregating all features of edges that point to the specific node,
-            according to a reduce operation. (:obj:`"add"`, :obj:`"mean"`,
-            :obj:`"min"`, :obj:`"max"`, :obj:`"mul"`). (default: :obj:`"mean"`)
-        bias (bool, optional): If set to :obj:`False`, the layer will not learn
-            an additive bias. (default: :obj:`True`)
-        share_weights (bool, optional): If set to :obj:`True`, the same matrix
-            will be applied to the source and the target node of every edge,
-            *i.e.* :math:`\mathbf{\Theta}_{s} = \mathbf{\Theta}_{t}`.
-            (default: :obj:`False`)
-        residual (bool, optional): If set to :obj:`True`, the layer will add
-            a learnable skip-connection. (default: :obj:`False`)
-        **kwargs (optional): Additional arguments of
-            :class:`torch_geometric.nn.conv.MessagePassing`.
-
-    Shapes:
-        - **input:**
-          node features :math:`(|\mathcal{V}|, F_{in})` or
-          :math:`((|\mathcal{V_s}|, F_{s}), (|\mathcal{V_t}|, F_{t}))`
-          if bipartite,
-          edge indices :math:`(2, |\mathcal{E}|)`,
-          edge features :math:`(|\mathcal{E}|, D)` *(optional)*
-        - **output:** node features :math:`(|\mathcal{V}|, H * F_{out})` or
-          :math:`((|\mathcal{V}_t|, H * F_{out})` if bipartite.
-          If :obj:`return_attention_weights=True`, then
-          :math:`((|\mathcal{V}|, H * F_{out}),
-          ((2, |\mathcal{E}|), (|\mathcal{E}|, H)))`
-          or :math:`((|\mathcal{V_t}|, H * F_{out}), ((2, |\mathcal{E}|),
-          (|\mathcal{E}|, H)))` if bipartite
-    """
-
     def __init__(
             self,
             in_channels: Union[int, Tuple[int, int]],
@@ -164,48 +65,95 @@ class GATv2Conv(MessagePassing):
         self.share_weights = share_weights
 
         if isinstance(in_channels, int):
-            self.lin_l = Linear(in_channels, heads * out_channels, bias=bias,
-                                weight_initializer='glorot')
-            self.lin_l_z = Linear(in_channels, heads * out_channels, bias=bias,
-                                weight_initializer='glorot')
-            if share_weights:
-                self.lin_r = self.lin_l
-            else:
-                self.lin_r = Linear(in_channels, heads * out_channels,
-                                    bias=bias, weight_initializer='glorot')
-        else:
-            self.lin_l = Linear(in_channels[0], heads * out_channels,
-                                bias=bias, weight_initializer='glorot')
-            self.lin_l_z = Linear(in_channels[0], heads * out_channels, bias=bias,
-                                weight_initializer='glorot')
+            self.lin_l = Linear(
+                in_channels,
+                heads * out_channels,
+                bias=bias,
+                weight_initializer='glorot'
+            )
+            self.lin_l_z = Linear(
+                in_channels,
+                heads * out_channels,
+                bias=bias,
+                weight_initializer='glorot'
+            )
 
             if share_weights:
                 self.lin_r = self.lin_l
+                self.lin_r_z = self.lin_l_z
             else:
-                self.lin_r = Linear(in_channels[1], heads * out_channels,
-                                    bias=bias, weight_initializer='glorot')
-                self.lin_r_z = Linear(in_channels[1], heads * out_channels,
-                                    bias=bias, weight_initializer='glorot')
+                self.lin_r = Linear(
+                    in_channels,
+                    heads * out_channels,
+                    bias=bias,
+                    weight_initializer='glorot'
+                )
+                self.lin_r_z = Linear(
+                    in_channels,
+                    heads * out_channels,
+                    bias=bias,
+                    weight_initializer='glorot'
+                )
+
+        else:
+            self.lin_l = Linear(
+                in_channels[0],
+                heads * out_channels,
+                bias=bias,
+                weight_initializer='glorot'
+            )
+            self.lin_l_z = Linear(
+                in_channels[0],
+                heads * out_channels,
+                bias=bias,
+                weight_initializer='glorot'
+            )
+
+            if share_weights:
+                self.lin_r = self.lin_l
+                self.lin_r_z = self.lin_l_z
+            else:
+                self.lin_r = Linear(
+                    in_channels[1],
+                    heads * out_channels,
+                    bias=bias,
+                    weight_initializer='glorot'
+                )
+                self.lin_r_z = Linear(
+                    in_channels[1],
+                    heads * out_channels,
+                    bias=bias,
+                    weight_initializer='glorot'
+                )
 
         self.att = Parameter(torch.empty(1, heads, out_channels))
+
+        # Head-specific mask attention parameters.
         self.att_z_l = Parameter(torch.empty(1, heads, out_channels))
         self.att_z_r = Parameter(torch.empty(1, heads, out_channels))
 
         if edge_dim is not None:
-            self.lin_edge = Linear(edge_dim, heads * out_channels, bias=False,
-                                   weight_initializer='glorot')
-            self.lin_edge_z = Linear(edge_dim, heads * out_channels, bias=False,
-                                   weight_initializer='glorot')
+            self.lin_edge = Linear(
+                edge_dim,
+                heads * out_channels,
+                bias=False,
+                weight_initializer='glorot'
+            )
+            self.lin_edge_z = Linear(
+                edge_dim,
+                heads * out_channels,
+                bias=False,
+                weight_initializer='glorot'
+            )
         else:
             self.lin_edge = None
+            self.lin_edge_z = None
 
-        # The number of output channels:
         total_out_channels = out_channels * (heads if concat else 1)
 
         if residual:
             self.res = Linear(
-                in_channels
-                if isinstance(in_channels, int) else in_channels[1],
+                in_channels if isinstance(in_channels, int) else in_channels[1],
                 total_out_channels,
                 bias=False,
                 weight_initializer='glorot',
@@ -222,35 +170,64 @@ class GATv2Conv(MessagePassing):
             torch.nn.Linear(2 * out_channels, out_channels),
             torch.nn.ReLU(),
             torch.nn.Linear(out_channels, 1),
-            torch.nn.Sigmoid()  # Ensures output is between 0 and 1
+            torch.nn.Sigmoid()
         )
 
-        # for SGAT
+        # SGAT / L0 mask parameters.
         self.bias_l0 = nn.Parameter(torch.FloatTensor([0]))
-        self.bias_l0_z = nn.Parameter(torch.FloatTensor([0]))
+
+        # Changed from scalar [1] to per-head [1, H].
+        # This allows each head to learn a different sparsity threshold.
+        self.bias_l0_z = nn.Parameter(torch.zeros(1, heads))
+
         self.loss = 0
 
         self.reset_parameters()
 
     def reset_parameters(self):
         super().reset_parameters()
+
+        # Main attention branch
         nn.init.uniform_(self.lin_l.weight, a=-1.0, b=1.0)
         nn.init.uniform_(self.lin_r.weight, a=-1.0, b=1.0)
-        # nn.init.uniform_(self.lin_r_z.weight, a=1.0, b=1.0)
-        # nn.init.uniform_(self.lin_l_z.weight, a=1.0, b=1.0)
 
-        # self.lin_l.reset_parameters()
-        # self.lin_r.reset_parameters()
+        # Sparse-mask branch
+        nn.init.uniform_(self.lin_l_z.weight, a=-1.0, b=1.0)
+        nn.init.uniform_(self.lin_r_z.weight, a=-1.0, b=1.0)
+
+        if self.lin_l.bias is not None:
+            zeros(self.lin_l.bias)
+        if self.lin_r.bias is not None:
+            zeros(self.lin_r.bias)
+        if self.lin_l_z.bias is not None:
+            zeros(self.lin_l_z.bias)
+        if self.lin_r_z.bias is not None:
+            zeros(self.lin_r_z.bias)
+
+        # Edge feature branches
         if self.lin_edge is not None:
-            # self.lin_edge.reset_parameters()
             nn.init.uniform_(self.lin_edge.weight, a=-1.0, b=1.0)
+
+        if self.lin_edge_z is not None:
+            nn.init.uniform_(self.lin_edge_z.weight, a=-1.0, b=1.0)
+
+        # Residual branch
         if self.res is not None:
             nn.init.uniform_(self.res.weight, a=-1.0, b=1.0)
-            # self.res.reset_parameters()
+
+        # Attention vectors
         glorot(self.att)
         glorot(self.att_z_l)
         glorot(self.att_z_r)
-        zeros(self.bias)
+
+        # Output bias
+        if self.bias is not None:
+            zeros(self.bias)
+
+        # L0 gate biases
+        with torch.no_grad():
+            self.bias_l0.zero_()
+            self.bias_l0_z.zero_()
 
     @overload
     def forward(
@@ -282,7 +259,7 @@ class GATv2Conv(MessagePassing):
     ) -> Tuple[Tensor, SparseTensor]:
         pass
 
-    def forward(  # noqa: F811
+    def forward(
             self,
             x: Union[Tensor, PairTensor],
             edge_index: Adj,
@@ -294,25 +271,15 @@ class GATv2Conv(MessagePassing):
         Tuple[Tensor, SparseTensor],
         Tuple[Tensor, Tensor]
     ]:
-        r"""Runs the forward pass of the module.
-
-        Args:
-            x (torch.Tensor or (torch.Tensor, torch.Tensor)): The input node
-                features.
-            edge_index (torch.Tensor or SparseTensor): The edge indices.
-            edge_attr (torch.Tensor, optional): The edge features.
-                (default: :obj:`None`)
-            return_attention_weights (bool, optional): If set to :obj:`True`,
-                will additionally return the tuple
-                :obj:`(edge_index, attention_weights)`, holding the computed
-                attention weights for each edge. (default: :obj:`None`)
-        """
         H, C = self.heads, self.out_channels
 
         res: Optional[Tensor] = None
 
         x_l: OptTensor = None
         x_r: OptTensor = None
+        x_l_z: OptTensor = None
+        x_r_z: OptTensor = None
+
         if isinstance(x, Tensor):
             assert x.dim() == 2
 
@@ -320,33 +287,53 @@ class GATv2Conv(MessagePassing):
                 res = self.res(x)
 
             x_l = self.lin_l(x).view(-1, H, C)
+            x_l_z = self.lin_l_z(x).view(-1, H, C)
+
             if self.share_weights:
                 x_r = x_l
+                x_r_z = x_l_z
             else:
                 x_r = self.lin_r(x).view(-1, H, C)
+                x_r_z = self.lin_r_z(x).view(-1, H, C)
+
         else:
             x_l_input, x_z_input, x_r_input, x_r_z_input = x[0], x[1], x[2], x[3]
-            assert x[0].dim() == 2
+            assert x_l_input.dim() == 2
 
             if x_r_input is not None and self.res is not None:
                 res = self.res(x_r_input)
 
             x_l = self.lin_l(x_l_input).view(-1, H, C)
             x_l_z = self.lin_l_z(x_z_input).view(-1, H, C)
+
             if x_r_input is not None:
                 x_r = self.lin_r(x_r_input).view(-1, H, C)
                 x_r_z = self.lin_r_z(x_r_z_input).view(-1, H, C)
 
         assert x_l is not None
         assert x_r is not None
+        assert x_l_z is not None
+        assert x_r_z is not None
 
-        self.loss = 0  # for SGAT, making l2 loss zero at the beginning of forward
+        self.loss = 0
 
-        # edge_updater_type: (x: PairTensor, edge_attr: OptTensor)
-        self.z = self.edge_updater(edge_index, x=(x_l_z, x_r_z), edge_attr=edge_attr, func='edge_update_z')
-        alpha = self.edge_updater(edge_index, x=(x_l, x_r), edge_attr=edge_attr, func='edge_update_alpha')
+        # Compute sparse masks first.
+        self.z = self.edge_updater(
+            edge_index,
+            x=(x_l_z, x_r_z),
+            edge_attr=edge_attr,
+            func='edge_update_z'
+        )
 
-        # propagate_type: (x: PairTensor, alpha: Tensor)
+        # Compute attention and apply mask.
+        alpha = self.edge_updater(
+            edge_index,
+            x=(x_l, x_r),
+            edge_attr=edge_attr,
+            z=self.z,
+            func='edge_update_alpha'
+        )
+
         out = self.propagate(edge_index, x=(x_l, x_r), alpha=alpha)
 
         if self.concat:
@@ -363,81 +350,122 @@ class GATv2Conv(MessagePassing):
         if isinstance(return_attention_weights, bool):
             if isinstance(edge_index, Tensor):
                 if is_torch_sparse_tensor(edge_index):
-                    # TODO TorchScript requires to return a tuple
                     adj = set_sparse_value(edge_index, alpha)
                     return out, (adj, alpha)
                 else:
                     return out, (edge_index, alpha)
+
             elif isinstance(edge_index, SparseTensor):
                 return out, edge_index.set_value(alpha, layout='coo')
+
         else:
             return out, self.loss, self.z
 
+    def edge_update_z(
+            self,
+            x_j: Tensor,
+            x_i: Tensor,
+            edge_attr: OptTensor,
+            index: Tensor,
+            ptr: OptTensor,
+            dim_size: Optional[int],
+    ) -> Tensor:
+        """
+        Compute L0 sparse mask per edge and per head.
 
-    def edge_update_z(self, x_j: Tensor, x_i: Tensor, edge_attr: OptTensor,
-                      index: Tensor, ptr: OptTensor,
-                      dim_size: Optional[int]):
-        # x_i, x_j: [E, H, C]
+        x_i, x_j: [E, H, C]
+        output z_raw: [E, H]
+        """
 
-        # Aggregate over heads + channels to get a single scalar per edge:
-        h = x_i + x_j  # [E, H, C]
-        # h_edge = h.mean(dim=(1, 2), keepdim=True)  # [E, 1]
-        h_edge = h.sum(dim=-1)
+        # Use the mask-specific attention parameters.
+        # This was missing in the current version, although att_z_l/att_z_r exist.
+        logits_l = (x_i * self.att_z_l).sum(dim=-1)  # [E, H]
+        logits_r = (x_j * self.att_z_r).sum(dim=-1)  # [E, H]
 
-        logits = h_edge.squeeze(-1) + self.bias_l0_z  # bias_l0_global: [1] or [1,1]
+        logits = logits_l + logits_r + self.bias_l0_z  # [E, H]
 
+        # Add edge features in a head-specific way.
         if edge_attr is not None:
             if edge_attr.dim() == 1:
                 edge_attr = edge_attr.view(-1, 1)
-            edge_attr = self.lin_edge_z(edge_attr)  # [E, C']
-            # logits = logits + edge_attr.mean(dim=-1, keepdim=True)  # [E,1]
-            logits = logits + edge_attr.sum(dim=-1, keepdim=True)  # [E,1]
 
-        logits = logits - logits.mean(dim=-1, keepdim=True)
-        logits = logits / (logits.std(dim=-1, keepdim=True) + 1e-6)
-        # logits = logits * 0.5
+            assert self.lin_edge_z is not None
+
+            edge_attr_z = self.lin_edge_z(edge_attr)  # [E, H * C]
+            edge_attr_z = edge_attr_z.view(
+                -1,
+                self.heads,
+                self.out_channels
+            )  # [E, H, C]
+
+            logits = logits + edge_attr_z.sum(dim=-1)  # [E, H]
+
+        # Important change:
+        # Normalise each head over all edges, not each edge over all heads.
+        std = logits.std(dim=0, keepdim=True, unbiased=False)
+        logits = (logits - logits.mean(dim=0, keepdim=True)) / (std + 1e-6)
 
         if self.training:
-            # z_raw = l0_train(logits, 0, 1).squeeze(-1)  # [E]
-            num_samples = 4
-            masks = []
-            for _ in range(num_samples):
-                masks.append(l0_train(logits, 0.0, 1.0))
-            z_raw = torch.stack(masks, dim=0).mean(dim=0).squeeze(-1)
+            # Keep this simple first.
+            # You can add multi-sample averaging later if the gates are too noisy.
+            z_raw = l0_train(logits, 0.0, 1.0)  # [E, H]
         else:
-            z_raw = l0_test(logits, 0, 1).squeeze(-1)  # [E]
+            z_raw = l0_test(logits, 0.0, 1.0)  # [E, H]
 
-        self.loss = get_loss2(logits.squeeze(-1)).sum()
+        # L0 regularisation term.
+        self.loss = get_loss2(logits).sum()
 
-        # return z_raw.unsqueeze(-1).expand(-1, self.heads)  # [E]
-        return z_raw # [E]
+        return z_raw
 
-    def edge_update_alpha(self, x_j: Tensor, x_i: Tensor, edge_attr: OptTensor,
-                          index: Tensor, ptr: OptTensor,
-                          dim_size: Optional[int],
-                          z: Tensor) -> Tensor:
+    def edge_update_alpha(
+            self,
+            x_j: Tensor,
+            x_i: Tensor,
+            edge_attr: OptTensor,
+            index: Tensor,
+            ptr: OptTensor,
+            dim_size: Optional[int],
+            z: Tensor,
+    ) -> Tensor:
+        """
+        Compute attention alpha, apply sparse mask, then renormalise.
+
+        x_i, x_j: [E, H, C]
+        z:        [E, H]
+        alpha:    [E, H]
+        """
+
         x = x_i + x_j
-        tmp = (x_i).sum(dim=-1).unsqueeze(-1) + (x_j).sum(dim=-1).unsqueeze(-1)
 
         if edge_attr is not None:
             if edge_attr.dim() == 1:
                 edge_attr = edge_attr.view(-1, 1)
+
             assert self.lin_edge is not None
+
             edge_attr = self.lin_edge(edge_attr)
-            edge_attr = edge_attr.view(-1, self.heads, self.out_channels)
+            edge_attr = edge_attr.view(
+                -1,
+                self.heads,
+                self.out_channels
+            )
+
             x = x + edge_attr
 
         x = F.leaky_relu(x, self.negative_slope)
-        alpha = (x * self.att).sum(dim=-1)
 
-        # check if self.z has any zero entries
-        # if torch.any(self.z == 0):
-        #     print("Zero entries in z detected during alpha computation.")
+        alpha = (x * self.att).sum(dim=-1)  # [E, H]
 
+        # Standard GAT softmax over incoming edges per target node.
         alpha = softmax(alpha, index, ptr, dim_size)
-        alpha = alpha * self.z
-        # alpha = alpha
-        # alpha = masked_normalize_multihead(alpha, index, dim_size)
+
+        # Apply learned sparse mask.
+        alpha = alpha * z
+
+        # Important change:
+        # Re-normalise after masking so sparse heads do not automatically
+        # produce lower-magnitude messages than the dense head.
+        alpha = masked_normalize_multihead(alpha, index, dim_size)
 
         alpha = F.dropout(alpha, p=self.dropout, training=self.training)
 

@@ -28,16 +28,22 @@ model:
   gat:
     ogm_input_dim: 2 # input dimension of the occupancy grid map cells
     dim_model: 32 # dimension that embedding layer maps the input of the model to.
-    dim_cell_model: 16 # dimension that embedding layer maps each cell of the ogm
+    dim_cell_model: 64 # dimension that embedding layer maps each cell of the ogm
     dim_obs_model: 32 # dimension that embedding layer maps the latent observation output from temporal encoder
     dim_edge: 1 # edge feature dimension
     num_heads: 2
     dropout: 0.2
+
   map_encoder:
-    dim_model: 64
-    pooling: 'avg'
-    pretrained: True
-    architecture: 'resnet50'
+    architecture: convnext_tiny
+    num_semantic_classes: 9
+    pretrained: true
+    # Recommended for categorical semantic channels.
+    stem_init: random
+    projection_dim: 32
+    map_context_dim: 64
+    cell_node_dim: 64
+    dropout: 0.1
 
 # Data Configs
 data:

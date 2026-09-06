@@ -1,9 +1,8 @@
 from torch import nn
 
+from src.models.vision.semantic_context_encoder import SemanticContextEncoder
 from src.models.gat.gat_layer import GATLayer
-from src.models.gate.expert_gating import GatedFusion
 from src.models.transformer.temporal_encoder import TemporalEncoder
-from src.models.vision.map_encoder import MapEncoder
 
 
 class VSTSBGT(nn.Module):
@@ -32,14 +31,16 @@ class VSTSBGT(nn.Module):
         self.gat_layer = GATLayer(gat_configs)
 
         map_encoder_configs = configs['map_encoder']
-        self.map_encoder = MapEncoder(d_model=map_encoder_configs['dim_model'],
-                                      pretrained=map_encoder_configs['pretrained'],
-                                      global_pool=map_encoder_configs['pooling'],
-                                      architecture=map_encoder_configs['architecture'])
-
-        self.fusion = GatedFusion(d_veh=gat_configs['dim_model'],
-                                  d_img=map_encoder_configs['dim_model'],
-                                  use_cell_in_gate=False)
+        self.semantic_context_encoder = (
+            SemanticContextEncoder(
+                num_semantic_classes=map_encoder_configs["num_semantic_classes"],
+                map_context_dim=map_encoder_configs.get("map_context_dim", 64,),
+                cell_node_dim=map_encoder_configs.get("cell_node_dim", 64,),
+                projection_dim=map_encoder_configs.get("projection_dim", 32,),
+                pretrained=map_encoder_configs.get("pretrained", True,),
+                stem_init=map_encoder_configs.get("stem_init", "random",),
+            )
+        )
 
         self.fc_out = nn.Linear(gat_configs['dim_model'], 1)
 
@@ -51,24 +52,28 @@ class VSTSBGT(nn.Module):
     def forward(self, x):
         seq_mask = x['seq_mask']  # Sequence mask for the historical observations
         vehicle_mask = x['vehicle_mask']
-        cell_feat = x['hidden_ogm_cells']
+        cell_xy = x['hidden_ogm_cells']
         veh_feat = x['historical_adjacent_obs']
-        map_img = x['map_obs']
+        semantic_map = x['map_obs']
 
         x_te = self.temporal_encoder(veh_feat, seq_mask, vehicle_mask)
         z_te = self.z_encoder(veh_feat, seq_mask, vehicle_mask)
-        gat_out, l2_loss, z_mask = self.gat_layer(x_te, z_te, cell_feat, x['edge_weights'], x['edge_index'])
+
+        # -----------------------------------------
+        # NEW:
+        # semantic-map information goes upstream
+        # of graph attention.
+        # -----------------------------------------
+        map_outputs = self.semantic_context_encoder(
+            semantic_map=semantic_map,
+            cell_xy=cell_xy,
+        )
+        cell_embedding = map_outputs["cell_embedding"]
+
+        gat_out, l2_loss, z_mask = self.gat_layer(x_te, z_te, cell_embedding, x['edge_weights'], x['edge_index'])
         # gat_out: [B, N_cells, dim_model]. N_cells is 1 during training but can be >1 at
         # inference (e.g. predicting occupancy for every candidate cell of a frame at once).
 
-        # unet_out = self.unet(x)
-        map_inputs = map_img.permute(0, 3, 1, 2)
-        map_output = self.map_encoder(map_inputs)  # [B, d_img], one embedding per sample
-        map_output = map_output.unsqueeze(1).expand(-1, gat_out.size(1), -1)  # broadcast over cells
+        out_fc = self.fc_out(gat_out)
 
-        h_fused, gates = self.fusion(gat_out, map_output)
-
-        out_fc = self.fc_out(h_fused)
-        # out_fc = self.fc_out(gat_out)
-
-        return out_fc, gates, l2_loss, z_mask
+        return out_fc, None, l2_loss, z_mask

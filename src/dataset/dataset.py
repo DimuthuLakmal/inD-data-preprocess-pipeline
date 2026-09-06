@@ -4,8 +4,9 @@ import numpy
 import torch
 from torch.utils.data import Dataset
 
-from utils.ogm_util import create_OGM_ego, get_vert
-from dataset import feature_builder
+from src.utils.ogm_util import create_OGM_ego, get_vert
+from src.dataset import feature_builder
+from src.utils.semantic_maps import semantic_map_to_one_hot
 
 import json
 import cv2
@@ -16,6 +17,19 @@ import os
 
 from loguru import logger
 import pickle
+
+
+SEMANTIC_PALETTE_BGR = {
+    'fixed_blocks': (0, 255, 0),
+    'walking_path': (255, 0, 0),
+    'vegetation': (255, 0, 150),
+    'road': (0, 0, 255),
+    'lines': (255, 255, 255),
+    'pedestrian_crossing': (255, 150, 0),
+    'parking': (0, 255, 255),
+    'refuge_island': (90, 90, 90),
+    'background': (0, 0, 0)
+}
 
 
 class OGMDataset(Dataset):
@@ -58,8 +72,10 @@ class OGMDataset(Dataset):
         self.data_dict = pickle.load(open(observation_file_path, "rb"))
 
         # Loading background images
-        self.background_images = feature_builder.load_background_images(
-            self.input_path, scene_ids, start_scene, end_scene)
+        self.background_images = {}  # retraining only for functioning of old code
+        self.semantic_maps = {}
+        self.semantic_map_shapes = {}
+        self.load_maps(scene_ids, start_scene, end_scene)
 
         # load json files from annotations path
         annotation_files = [f for f in os.listdir(self.annotations_path) if f.endswith('.json')]
@@ -94,8 +110,8 @@ class OGMDataset(Dataset):
                 normalised_data = []
                 hidden_ogm_cells_xys = []
                 for cell in data:
-                    normalised_data.append([cell['cx'] / self.background_images[scene_id].shape[1],
-                                           cell['cy'] / self.background_images[scene_id].shape[0],
+                    normalised_data.append([cell['cx'] / (self.background_images[scene_id].shape[1] -1),
+                                           cell['cy'] / (self.background_images[scene_id].shape[0] - 1),
                                            cell['label']])
 
                     # observation data for ego vehicle at current frame also stored using the same key in data_dict
@@ -209,7 +225,7 @@ class OGMDataset(Dataset):
 
         hidden_ogm_cells = np.array(hidden_ogm_cells, dtype=np.float32)
 
-        map_resized = feature_builder.build_map_obs(backgrond_img, hidden_cell_polygon_xys)
+        map_resized = self.semantic_maps[scene_id].copy()
         hidden_cells_resized = cv2.resize(np.zeros_like(backgrond_img[:, :, 0:1]), (224, 224),
                                           interpolation=cv2.INTER_AREA)
 
@@ -231,3 +247,45 @@ class OGMDataset(Dataset):
         target = hidden_ogm_cells[:, -1:].astype(np.float32)
 
         return input, target
+
+    def load_maps(self, scene_ids, start_scene, end_scene):
+        for scene_id in scene_ids:
+
+            scene_id = int(scene_id)
+
+            if (scene_id < start_scene or scene_id > end_scene):
+                continue
+
+            bg_path = os.path.join(
+                self.input_path,
+                "semantic_maps",
+                f"{scene_id:02d}_background.png",
+            )
+
+            image_bgr = cv2.imread(
+                bg_path,
+                cv2.IMREAD_COLOR,
+            )
+
+            if image_bgr is None:
+                raise FileNotFoundError(
+                    bg_path
+                )
+
+            # Retain this if other existing dataset
+            # functions still need the original image.
+            self.background_images[scene_id] = image_bgr
+            h, w = image_bgr.shape[:2]
+
+            self.semantic_map_shapes[scene_id] = (h, w)
+
+            one_hot, class_ids, class_names = (
+                semantic_map_to_one_hot(
+                    image_bgr=image_bgr,
+                    palette_bgr=SEMANTIC_PALETTE_BGR,
+                    output_size=(224, 224),
+                )
+            )
+
+            # [K,224,224]
+            self.semantic_maps[scene_id] = one_hot

@@ -29,13 +29,9 @@ class GATLayer(nn.Module):
                              edge_dim=dim_edge,
                              add_self_loops=False)
 
-        # it uses two separate MLPs to embed the cell queries for x_te and x_te_z
-        self.cell_emb = CellQueryEmb(d_model=dim_cell_model, mode="mlp")
-        self.cell_emb_z = CellQueryEmb(d_model=dim_cell_model, mode="mlp")
-
     def forward(self, x_te_batch, x_te_z_batch, cell_batch, edge_attr_batch, edge_index_batch):
-        x_cell_batch = self.cell_emb(cell_batch)
-        x_cell_z_batch = self.cell_emb_z(cell_batch)
+        x_cell_batch = cell_batch
+        x_cell_z_batch = cell_batch
 
         gat_out_batch = []
         z_mask_batch = []

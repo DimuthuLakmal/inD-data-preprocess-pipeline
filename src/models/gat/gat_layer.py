@@ -9,7 +9,6 @@ import torch
 from torch import nn
 
 from src.models.gat.gat import GATv2Conv
-from src.models.gat.cell_query_emb import CellQueryEmb
 
 
 class GATLayer(nn.Module):

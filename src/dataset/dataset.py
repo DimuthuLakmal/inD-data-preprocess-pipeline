@@ -1,12 +1,11 @@
 import random
-from copy import deepcopy
 
 import numpy
 import torch
 from torch.utils.data import Dataset
-from typing import Tuple
 
 from utils.ogm_util import create_OGM_ego, get_vert
+from dataset import feature_builder
 
 import json
 import cv2
@@ -14,7 +13,6 @@ import numpy as np
 from pathlib import Path
 import re
 import os
-import math
 
 from loguru import logger
 import pickle
@@ -60,14 +58,8 @@ class OGMDataset(Dataset):
         self.data_dict = pickle.load(open(observation_file_path, "rb"))
 
         # Loading background images
-        for scene_id in scene_ids:
-            if int(scene_id) < start_scene or int(scene_id) > end_scene:
-                continue
-
-            # Store background images for scenes
-            bg_path = os.path.join(self.input_path, 'semantic_maps', f"{scene_id}_background.png")
-            img = cv2.imread(bg_path)
-            self.background_images[int(scene_id)] = img
+        self.background_images = feature_builder.load_background_images(
+            self.input_path, scene_ids, start_scene, end_scene)
 
         # load json files from annotations path
         annotation_files = [f for f in os.listdir(self.annotations_path) if f.endswith('.json')]
@@ -151,16 +143,11 @@ class OGMDataset(Dataset):
             ogm_cells_xys = [ogm_cells_xys[random_index]]
 
             historical_adjacent_obs, hidden_ogm_cells = (data_dict["historical_adjacent_obs"], data_dict["hidden_ogm_cells"])
-            last_recorded_t = {}
-            for i, (veh_index, obs) in enumerate(historical_adjacent_obs.items()):
-                # Find the index of the last non-zero observation obs np array
-                mask = np.any(np.array(obs) != 0, axis=1)
-                last_t = np.where(mask)[0].max() if np.any(mask) else None
-                last_recorded_t[veh_index] = last_t
+            last_recorded_t = feature_builder.compute_last_recorded_t(historical_adjacent_obs)
 
             # Extract distances for hidden ogm cells from adjacent tracks (This is a bi-partition graph)
-            edge_weights, edge_index = self._extract_edge_info(historical_adjacent_obs, ogm_cells,
-                                                               last_recorded_t)
+            edge_weights, edge_index = feature_builder.extract_edge_info(historical_adjacent_obs, ogm_cells,
+                                                                         last_recorded_t)
 
             data_dict["edge_weights"] = edge_weights
             data_dict["edge_index"] = edge_index
@@ -179,6 +166,29 @@ class OGMDataset(Dataset):
             idx = idx.tolist()
 
         key = self.keys[idx]
+
+        data_dict = self.data_dict[key]
+        return self._build_sample(key, data_dict["edge_weights"], data_dict["edge_index"],
+                                  data_dict["hidden_ogm_cells"], data_dict["hidden_cell_polygon_xys"])
+
+    def get_all_candidate_cells_sample(self, key):
+        """
+        Builds a model-ready sample using ALL candidate hidden cells recorded for this frame
+        (self.label_dict[key], before the single-cell narrowing applied for training), instead
+        of the one cell randomly selected in __init__. Intended for inference, e.g. predicting
+        occupancy for every candidate cell of a frame in a single forward pass.
+        """
+        ogm_cells, ogm_cells_xys = self.label_dict[key]
+        historical_adjacent_obs = self.data_dict[key]["historical_adjacent_obs"]
+        last_recorded_t = feature_builder.compute_last_recorded_t(historical_adjacent_obs)
+        edge_weights, edge_index = feature_builder.extract_edge_info(historical_adjacent_obs, ogm_cells, last_recorded_t)
+
+        hidden_ogm_cells = np.array(ogm_cells, dtype=np.float32)
+        hidden_cell_polygon_xys = np.array(ogm_cells_xys, dtype=np.float32)
+
+        return self._build_sample(key, edge_weights, edge_index, hidden_ogm_cells, hidden_cell_polygon_xys)
+
+    def _build_sample(self, key, edge_weights, edge_index, hidden_ogm_cells, hidden_cell_polygon_xys):
         keys = key.split("_")
         scene_id = int(keys[0])
 
@@ -186,54 +196,25 @@ class OGMDataset(Dataset):
 
         # map
         backgrond_img = self.background_images[scene_id]
-        gt_background_img = deepcopy(backgrond_img)
 
         # Historical observations
-        historical_adjacent_obs, historical_ego_obs, map_obs, hidden_tracks_pts, visible_tracks_pts, edge_weights, \
-            edge_index, ogm, ogm_gt, hidden_cell_polygon_xys = (data_dict["historical_adjacent_obs"],
-                                                                data_dict["historical_ego_obs"],
-                                                                data_dict["map_obs"],
-                                                                data_dict["hidden_tracks_pts"],
-                                                                data_dict["visible_tracks_pts"],
-                                                                data_dict["edge_weights"],
-                                                                data_dict["edge_index"],
-                                                                data_dict["ogm"],
-                                                                data_dict["ogm_gt"],
-                                                                data_dict["hidden_cell_polygon_xys"])
+        historical_adjacent_obs, historical_ego_obs, map_obs, hidden_tracks_pts, visible_tracks_pts, \
+            ogm, ogm_gt = (data_dict["historical_adjacent_obs"],
+                          data_dict["historical_ego_obs"],
+                          data_dict["map_obs"],
+                          data_dict["hidden_tracks_pts"],
+                          data_dict["visible_tracks_pts"],
+                          data_dict["ogm"],
+                          data_dict["ogm_gt"])
 
-        # Create a black background image a size of background_img
-        blank_img = np.zeros_like(backgrond_img[:, :, 0:1])  # Create a single channel image
-        for cel in hidden_cell_polygon_xys:
-            cv2.fillPoly(gt_background_img, [np.array(cel).astype(np.int32)], (0, 102, 204))
+        hidden_ogm_cells = np.array(hidden_ogm_cells, dtype=np.float32)
 
-        historical_adjacent_obs = np.array(list(historical_adjacent_obs.values()), dtype=np.float32)
+        map_resized = feature_builder.build_map_obs(backgrond_img, hidden_cell_polygon_xys)
+        hidden_cells_resized = cv2.resize(np.zeros_like(backgrond_img[:, :, 0:1]), (224, 224),
+                                          interpolation=cv2.INTER_AREA)
 
-        hidden_ogm_cells = np.array(data_dict["hidden_ogm_cells"], dtype=np.float32)
-
-        # Visual representation of the map
-        map_resized = cv2.resize(gt_background_img, (224, 224), interpolation=cv2.INTER_AREA)
-        hidden_cells_resized = cv2.resize(blank_img, (224, 224), interpolation=cv2.INTER_AREA)
-
-        seq_mask = np.all(historical_adjacent_obs == 0, axis=-1)  # Create a sequence mask where all features are zeros
-
-        # Fixing a class type issue (0 is used to represent car type. Replacing 0 with 4)
-        veh_type = historical_adjacent_obs[..., 7]  # (B, N, T)
-        mask = (veh_type == 0) & (~seq_mask)
-        veh_type[mask] = 4
-        historical_adjacent_obs[..., 7] = veh_type
-
-        # Attaching scene_id as a feature
-        scene_id_norm = scene_id / 10  # will be divided it further later to bring the range of 0 and 1
-        scene_id_arr = np.full(historical_adjacent_obs.shape[:-1] + (1,), scene_id_norm,
-                               dtype=historical_adjacent_obs.dtype)  # (B, N, T, 1)
-        historical_adjacent_obs = np.concatenate([historical_adjacent_obs, scene_id_arr], axis=-1)
-
-        historical_adjacent_obs[:, :, 2:3] = historical_adjacent_obs[:, :,
-                                             2:3] / 360.0  # Normalize heading to [0, 1]. This is a mistake done when extracting the data
-        historical_adjacent_obs[:, :, 3:] = historical_adjacent_obs[:, :, 3:] / 10.0
-
-        historical_adjacent_input = np.concatenate((historical_adjacent_obs[:, :, :9],
-                                                    historical_adjacent_obs[:, :, 10:11]), axis=-1)
+        historical_adjacent_input, seq_mask = feature_builder.build_vehicle_tensor(
+            historical_adjacent_obs, scene_id)
 
         input = {
             "historical_adjacent_obs": historical_adjacent_input,
@@ -250,20 +231,3 @@ class OGMDataset(Dataset):
         target = hidden_ogm_cells[:, -1:].astype(np.float32)
 
         return input, target
-
-
-    def _extract_edge_info(self, historical_adjacent_obs, hidden_ogm_cells, last_recorded_t) -> Tuple[list, list]:
-        edge_weights = []
-        edge_src, edge_dst = [], []
-        for i, cell in enumerate(hidden_ogm_cells):
-            for j, (track_idx, obs) in enumerate(historical_adjacent_obs.items()):
-                # Calculate the distance from the cell to the track center
-                obs_last_t = last_recorded_t[track_idx]
-                distance = math.sqrt((cell[0] - obs[obs_last_t][0]) ** 2 + (cell[1] - obs[obs_last_t][1]) ** 2)
-                edge_weights.append(distance)
-
-                edge_src.append(j)  # Source index is the track index
-                edge_dst.append(i)  # Destination index is the cell index
-
-        edge_index = [edge_src, edge_dst]
-        return edge_weights, edge_index

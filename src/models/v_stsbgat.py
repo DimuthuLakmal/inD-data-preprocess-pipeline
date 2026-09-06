@@ -58,11 +58,13 @@ class VSTSBGT(nn.Module):
         x_te = self.temporal_encoder(veh_feat, seq_mask, vehicle_mask)
         z_te = self.z_encoder(veh_feat, seq_mask, vehicle_mask)
         gat_out, l2_loss, z_mask = self.gat_layer(x_te, z_te, cell_feat, x['edge_weights'], x['edge_index'])
-        gat_out = gat_out.squeeze(1)
+        # gat_out: [B, N_cells, dim_model]. N_cells is 1 during training but can be >1 at
+        # inference (e.g. predicting occupancy for every candidate cell of a frame at once).
 
         # unet_out = self.unet(x)
         map_inputs = map_img.permute(0, 3, 1, 2)
-        map_output = self.map_encoder(map_inputs)
+        map_output = self.map_encoder(map_inputs)  # [B, d_img], one embedding per sample
+        map_output = map_output.unsqueeze(1).expand(-1, gat_out.size(1), -1)  # broadcast over cells
 
         h_fused, gates = self.fusion(gat_out, map_output)
 

@@ -1,17 +1,10 @@
 import torch
 import torch.nn as nn
 
-from src.models.vision.convnext_map_encoder import (
-    ConvNeXtMapEncoder,
-)
-
-from src.models.vision.cell_map_sampler import (
-    CellConditionedMultiScaleSampler,
-)
-
-from src.models.vision.cell_node_encoder import (
-    CellNodeEncoder,
-)
+from src.models.vision.convnext_map_encoder import ConvNeXtMapEncoder
+from src.models.vision.cell_map_sampler import CellConditionedMultiScaleSampler
+from src.models.vision.regnet_map_encoder import RegNetY800MFMapEncoder
+from src.models.vision.cell_node_encoder import CellNodeEncoder
 
 
 class SemanticContextEncoder(nn.Module):
@@ -19,49 +12,60 @@ class SemanticContextEncoder(nn.Module):
     def __init__(
         self,
         num_semantic_classes: int,
+        architecture: str = "regnet_y_800mf",
         map_context_dim: int = 64,
         cell_node_dim: int = 64,
         projection_dim: int = 32,
         pretrained: bool = True,
         stem_init: str = "random",
         dropout: float = 0.1,
+        freeze_backbone: bool = False,
     ):
         super().__init__()
+        # Select map backbone.
+        if architecture == "convnext_tiny":
 
-        self.map_encoder = (
-            ConvNeXtMapEncoder(
-                in_channels=(
-                    num_semantic_classes
-                ),
-                pretrained=pretrained,
-                stem_init=stem_init,
+            self.map_encoder = (
+                ConvNeXtMapEncoder(
+                    in_channels=(
+                        num_semantic_classes
+                    ),
+                    pretrained=pretrained,
+                    stem_init=stem_init,
+                    freeze_backbone=(
+                        freeze_backbone
+                    ),
+                )
             )
-        )
+
+        elif architecture == "regnet_y_800mf":
+
+            self.map_encoder = (
+                RegNetY800MFMapEncoder(
+                    in_channels=(
+                        num_semantic_classes
+                    ),
+                    pretrained=pretrained,
+                    stem_init=stem_init,
+                    freeze_backbone=(
+                        freeze_backbone
+                    ),
+                )
+            )
 
         self.sampler = (
             CellConditionedMultiScaleSampler(
-                in_channels=(
-                    self.map_encoder
-                    .out_channels
-                ),
-                projection_dim=(
-                    projection_dim
-                ),
-                output_dim=(
-                    map_context_dim
-                ),
+                in_channels=self.map_encoder.out_channels,
+                projection_dim=projection_dim,
+                output_dim=map_context_dim,
                 dropout=dropout,
             )
         )
 
         self.cell_encoder = (
             CellNodeEncoder(
-                map_context_dim=(
-                    map_context_dim
-                ),
-                output_dim=(
-                    cell_node_dim
-                ),
+                map_context_dim=map_context_dim,
+                output_dim=cell_node_dim,
                 dropout=dropout,
             )
         )
@@ -80,9 +84,7 @@ class SemanticContextEncoder(nn.Module):
             [B,Nc,2]
         """
 
-        pyramid = self.map_encoder(
-            semantic_map
-        )
+        pyramid = self.map_encoder(semantic_map)
 
         map_context = self.sampler(
             pyramid=pyramid,
@@ -98,12 +100,7 @@ class SemanticContextEncoder(nn.Module):
         )
 
         return {
-            "cell_embedding":
-                cell_embedding,
-
-            "map_context":
-                map_context,
-
-            "map_pyramid":
-                pyramid,
+            "cell_embedding": cell_embedding,
+            "map_context": map_context,
+            "map_pyramid": pyramid,
         }

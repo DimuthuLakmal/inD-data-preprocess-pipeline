@@ -1,6 +1,6 @@
 # Model Configs
 model:
-  lr: 0.0005 # learning rate
+  lr: 0.001 # learning rate
   use_lr_scheduler: True # if you want to use learning rate scheduler
   train_batch_size: 4
   test_batch_size: 4
@@ -35,7 +35,7 @@ model:
     dropout: 0.2
 
   map_encoder:
-    architecture: convnext_tiny
+    architecture: regnet_y_800mf
     num_semantic_classes: 9
     pretrained: true
     # Recommended for categorical semantic channels.
@@ -44,6 +44,7 @@ model:
     map_context_dim: 64
     cell_node_dim: 64
     dropout: 0.1
+    freeze_backbone: false
 
 # Data Configs
 data:

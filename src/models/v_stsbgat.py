@@ -1,5 +1,6 @@
 from torch import nn
 
+from models.gate.residual_gate import ResidualGatedFusion
 from src.models.vision.semantic_context_encoder import SemanticContextEncoder
 from src.models.gat.gat_layer import GATLayer
 from src.models.transformer.temporal_encoder import TemporalEncoder
@@ -39,6 +40,8 @@ class VSTSBGT(nn.Module):
                 projection_dim=map_encoder_configs.get("projection_dim", 32,),
                 pretrained=map_encoder_configs.get("pretrained", True,),
                 stem_init=map_encoder_configs.get("stem_init", "random",),
+                architecture=map_encoder_configs.get("architecture", "convnext_tiny",),
+                freeze_backbone=map_encoder_configs.get("freeze_backbone", False,),
             )
         )
 

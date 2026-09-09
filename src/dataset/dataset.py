@@ -160,6 +160,10 @@ class OGMDataset(Dataset):
         self.data_dict = data_dict
 
         self.keys = list(self.data_dict.keys())
+        self.sample_labels = np.array(
+            [int(self.data_dict[key]["hidden_ogm_cells"][0, -1]) for key in self.keys],
+            dtype=np.int64,
+        )
         print("Done Loading")
 
     def __len__(self):
@@ -174,6 +178,18 @@ class OGMDataset(Dataset):
         data_dict = self.data_dict[key]
         return self._build_sample(key, data_dict["edge_weights"], data_dict["edge_index"],
                                   data_dict["hidden_ogm_cells"], data_dict["hidden_cell_polygon_xys"])
+
+    def get_sample_weights(self):
+        """Per-sample weights for WeightedRandomSampler so label 0/1 are drawn
+        with equal probability during training. Label 3 (fixed-block, masked
+        out of the loss everywhere it's used) is folded into the negative
+        bucket so it isn't disproportionately oversampled relative to its
+        tiny natural count."""
+        is_positive = (self.sample_labels == 1)
+        counts = np.array([np.sum(~is_positive), np.sum(is_positive)])
+        counts = np.clip(counts, 1, None)  # guard against a class being absent
+        weights = np.where(is_positive, 1.0 / counts[1], 1.0 / counts[0])
+        return torch.DoubleTensor(weights)
 
     def get_all_candidate_cells_sample(self, key):
         """

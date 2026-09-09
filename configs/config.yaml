@@ -1,6 +1,6 @@
 # Model Configs
 model:
-  lr: 0.001 # learning rate
+  lr: 0.0005 # learning rate
   use_lr_scheduler: True # if you want to use learning rate scheduler
   train_batch_size: 4
   test_batch_size: 4
@@ -28,21 +28,21 @@ model:
   gat:
     ogm_input_dim: 2 # input dimension of the occupancy grid map cells
     dim_model: 32 # dimension that embedding layer maps the input of the model to.
-    dim_cell_model: 64 # dimension that embedding layer maps each cell of the ogm
+    dim_cell_model: 32 # dimension that embedding layer maps each cell of the ogm
     dim_obs_model: 32 # dimension that embedding layer maps the latent observation output from temporal encoder
     dim_edge: 1 # edge feature dimension
-    num_heads: 2
+    num_heads: 4
     dropout: 0.2
 
   map_encoder:
-    architecture: regnet_y_800mf
+    architecture: convnext_tiny
     num_semantic_classes: 9
     pretrained: true
     # Recommended for categorical semantic channels.
     stem_init: random
     projection_dim: 32
-    map_context_dim: 64
-    cell_node_dim: 64
+    map_context_dim: 32
+    cell_node_dim: 32
     dropout: 0.1
     freeze_backbone: false
 

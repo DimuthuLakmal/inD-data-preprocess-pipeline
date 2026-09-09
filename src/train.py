@@ -2,6 +2,7 @@ import argparse
 import logging
 from datetime import datetime
 
+import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
 import yaml
@@ -10,7 +11,7 @@ from dataset.data_loader import OGMDataLoader
 from models.v_stsbgat import VSTSBGT
 import torch.nn as nn
 
-from src.utils.metrics import compute_metrics
+from src.utils.metrics import compute_metrics, accumulate_counts, compute_metrics_from_counts
 from validate import evaluate
 
 
@@ -58,9 +59,11 @@ def train(model, train_data_loader, valid_data_loader, config):
     for epoch in range(config['model']['train_epochs']):  # Example: 10 epochs
         model.train()
 
-        total_loss = 0.0
-        total_metrics = {"accuracy": 0.0, "precision": 0.0, "recall": 0.0, "acc_free": 0.0, "f1": 0.0}
-        roc_count = 0  # count batches where ROC was computable
+        loss_sum = 0.0
+        mask_count_sum = 0.0
+        tp_sum = fp_sum = fn_sum = tn_sum = 0.0
+        y_true_all = []
+        y_prob_all = []
         batch_itr = 0
 
         for batch_idx, (inputs, target) in enumerate(train_data_loader):
@@ -92,18 +95,27 @@ def train(model, train_data_loader, valid_data_loader, config):
 
             # --- metrics per batch (masked) ---
             with torch.no_grad():
+                # Batch-level metric, only for the per-step TensorBoard/log lines below.
                 m = compute_metrics(outputs_sig.detach(), targets.detach(), mask.detach())
-                total_metrics["accuracy"] += m["accuracy"]
-                total_metrics["precision"] += m["precision"]
-                total_metrics["recall"] += m["recall"]
-                total_metrics["acc_free"] += m["acc_free"]
-                total_metrics["f1"] += m["f1"]
                 if m["roc_auc"] is not None:
                     # Log batch ROC when available
                     writer.add_scalar("train/roc_auc_batch", m["roc_auc"], global_step)
-                    roc_count += 1
 
-            total_loss += loss_avg.item()
+                # Accumulate raw counts across the whole epoch so epoch-level
+                # metrics are computed ONCE at the end (micro-average), rather
+                # than as an unweighted average of per-batch ratios - the
+                # latter is not invariant to batch_size.
+                tp, fp, fn, tn, y_true, y_prob = accumulate_counts(
+                    outputs_sig.detach(), targets.detach(), mask.detach())
+                tp_sum += tp
+                fp_sum += fp
+                fn_sum += fn
+                tn_sum += tn
+                y_true_all.append(y_true)
+                y_prob_all.append(y_prob)
+
+            loss_sum += loss_aggregated.sum().item()
+            mask_count_sum += mask.sum().item()
             batch_itr += 1
 
             optimizer.zero_grad()
@@ -124,8 +136,12 @@ def train(model, train_data_loader, valid_data_loader, config):
 
 
         # --- Epoch-level aggregates ---
-        train_loss = total_loss / batch_itr
-        avg_metrics = {k: v / batch_itr for k, v in total_metrics.items()}
+        train_loss = loss_sum / max(mask_count_sum, 1)
+        avg_metrics = compute_metrics_from_counts(
+            tp_sum, fp_sum, fn_sum, tn_sum,
+            y_true=np.concatenate(y_true_all) if y_true_all else None,
+            y_prob=np.concatenate(y_prob_all) if y_prob_all else None,
+        )
 
         print(f'Epoch {epoch}, Training Loss: {train_loss}')
         logging.info(f'Epoch {epoch}, Training Loss: {train_loss}, '
@@ -138,6 +154,8 @@ def train(model, train_data_loader, valid_data_loader, config):
         writer.add_scalar("train/recall_epoch", avg_metrics["recall"], epoch)
         writer.add_scalar("train/acc_free_epoch", avg_metrics["acc_free"], epoch)
         writer.add_scalar("train/f1_epoch", avg_metrics["f1"], epoch)
+        if avg_metrics["roc_auc"] is not None:
+            writer.add_scalar("train/roc_auc_epoch", avg_metrics["roc_auc"], epoch)
 
         # Validate the model
         valid_loss = evaluate(model, valid_data_loader, config['model']["device"], writer, epoch)

@@ -32,8 +32,7 @@ class VSTSBGT(nn.Module):
         self.gat_layer = GATLayer(gat_configs)
 
         map_encoder_configs = configs['map_encoder']
-        self.semantic_context_encoder = (
-            SemanticContextEncoder(
+        self.semantic_context_encoder = SemanticContextEncoder(
                 num_semantic_classes=map_encoder_configs["num_semantic_classes"],
                 map_context_dim=map_encoder_configs.get("map_context_dim", 64,),
                 cell_node_dim=map_encoder_configs.get("cell_node_dim", 64,),
@@ -42,7 +41,6 @@ class VSTSBGT(nn.Module):
                 stem_init=map_encoder_configs.get("stem_init", "random",),
                 architecture=map_encoder_configs.get("architecture", "convnext_tiny",),
                 freeze_backbone=map_encoder_configs.get("freeze_backbone", False,),
-            )
         )
 
         self.fc_out = nn.Linear(gat_configs['dim_model'], 1)
@@ -72,8 +70,9 @@ class VSTSBGT(nn.Module):
             cell_xy=cell_xy,
         )
         cell_embedding = map_outputs["cell_embedding"]
+        z_mask_embedding = map_outputs["z_mask_embedding"]
 
-        gat_out, l2_loss, z_mask = self.gat_layer(x_te, z_te, cell_embedding, x['edge_weights'], x['edge_index'])
+        gat_out, l2_loss, z_mask = self.gat_layer(x_te, z_te, cell_embedding, z_mask_embedding, x['edge_weights'], x['edge_index'])
         # gat_out: [B, N_cells, dim_model]. N_cells is 1 during training but can be >1 at
         # inference (e.g. predicting occupancy for every candidate cell of a frame at once).
 

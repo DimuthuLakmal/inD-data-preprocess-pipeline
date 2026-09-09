@@ -70,6 +70,14 @@ class SemanticContextEncoder(nn.Module):
             )
         )
 
+        self.mask_encoder = (
+            CellNodeEncoder(
+                map_context_dim=map_context_dim,
+                output_dim=cell_node_dim,
+                dropout=dropout,
+            )
+        )
+
     def forward(
         self,
         semantic_map: torch.Tensor,
@@ -99,8 +107,16 @@ class SemanticContextEncoder(nn.Module):
             )
         )
 
+        z_mask_embedding = (
+            self.mask_encoder(
+                cell_xy=cell_xy,
+                map_context=map_context,
+            )
+        )
+
         return {
             "cell_embedding": cell_embedding,
             "map_context": map_context,
             "map_pyramid": pyramid,
+            "z_mask_embedding": z_mask_embedding,
         }

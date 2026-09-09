@@ -28,9 +28,9 @@ class GATLayer(nn.Module):
                              edge_dim=dim_edge,
                              add_self_loops=False)
 
-    def forward(self, x_te_batch, x_te_z_batch, cell_batch, edge_attr_batch, edge_index_batch):
+    def forward(self, x_te_batch, x_te_z_batch, cell_batch, z_batch, edge_attr_batch, edge_index_batch):
         x_cell_batch = cell_batch
-        x_cell_z_batch = cell_batch
+        x_cell_z_batch = z_batch
 
         gat_out_batch = []
         z_mask_batch = []

@@ -10,7 +10,7 @@ import cv2
 from fvcore.nn import FlopCountAnalysis
 import time
 
-from src.utils.metrics import compute_metrics
+from src.utils.metrics import accumulate_counts, compute_metrics_from_counts
 
 
 def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False):
@@ -30,10 +30,11 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False)
 
     with torch.no_grad():  # Example: 10 epochs
 
-        total_loss = 0.0
-        v_total = {"loss": 0.0, "accuracy": 0.0, "precision": 0.0, "recall": 0.0, "acc_free": 0.0, "f1": 0.0}
-        v_batches = 0
-        v_roc = []
+        loss_sum = 0.0
+        mask_count_sum = 0.0
+        tp_sum = fp_sum = fn_sum = tn_sum = 0.0
+        y_true_all = []
+        y_prob_all = []
         batch_itr = 0
 
         for batch_idx, (inputs, target) in enumerate(valid_data_loader):
@@ -71,14 +72,21 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False)
             loss_aggregated = loss_fn_aggregated(outputs, targets)
             loss_aggregated = loss_aggregated * mask
             # scene_wise_loss = list(loss_aggregated.detach().cpu().numpy())
-            loss_avg = loss_aggregated.sum() / (mask.sum().clamp_min(1))
 
-            v_total["loss"] += loss_avg.item()
-            m = compute_metrics(outputs_sig, targets, mask)
-            for k in ("accuracy", "precision", "recall", "f1", "acc_free"):
-                v_total[k] += m[k]
-            if m["roc_auc"] is not None:
-                v_roc.append(m["roc_auc"])
+            # Accumulate raw sums/counts across all batches so that loss and
+            # metrics are computed ONCE over the whole validation set at the
+            # end, rather than as an unweighted average of per-batch values -
+            # the latter is not invariant to test_batch_size.
+            loss_sum += loss_aggregated.sum().item()
+            mask_count_sum += mask.sum().item()
+
+            tp, fp, fn, tn, y_true, y_prob = accumulate_counts(outputs_sig, targets, mask)
+            tp_sum += tp
+            fp_sum += fp
+            fn_sum += fn
+            tn_sum += tn
+            y_true_all.append(y_true)
+            y_prob_all.append(y_prob)
 
             batch_itr += 1
 
@@ -131,26 +139,31 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False)
             #
             #             cv2.imwrite(f'../results/edge_masks/{batch_idx}_{b_i}_{h}.png', map_img_t)
 
-    valid_loss = v_total["loss"] / batch_itr
+    valid_loss = loss_sum / max(mask_count_sum, 1)
+    m = compute_metrics_from_counts(
+        tp_sum, fp_sum, fn_sum, tn_sum,
+        y_true=np.concatenate(y_true_all) if y_true_all else None,
+        y_prob=np.concatenate(y_prob_all) if y_prob_all else None,
+    )
 
     print(f'Average Inference Time per batch: {np.mean(times)} ms, Std Dev: {np.std(times)} ms')
 
     if not test:
         writer.add_scalar("val/loss_epoch", valid_loss, epoch)
-        writer.add_scalar("val/accuracy_epoch", v_total["accuracy"] / batch_itr, epoch)
-        writer.add_scalar("val/precision_epoch", v_total["precision"] / batch_itr, epoch)
-        writer.add_scalar("val/recall_epoch", v_total["recall"] / batch_itr, epoch)
-        writer.add_scalar("val/acc_free_epoch", v_total["acc_free"] / batch_itr, epoch)
-        writer.add_scalar("val/f1_epoch", v_total["f1"] / batch_itr, epoch)
-        if len(v_roc) > 0:
-            writer.add_scalar("val/roc_auc_epoch", float(np.mean(v_roc)), epoch)
+        writer.add_scalar("val/accuracy_epoch", m["accuracy"], epoch)
+        writer.add_scalar("val/precision_epoch", m["precision"], epoch)
+        writer.add_scalar("val/recall_epoch", m["recall"], epoch)
+        writer.add_scalar("val/acc_free_epoch", m["acc_free"], epoch)
+        writer.add_scalar("val/f1_epoch", m["f1"], epoch)
+        if m["roc_auc"] is not None:
+            writer.add_scalar("val/roc_auc_epoch", m["roc_auc"], epoch)
 
         print(f'Epoch {epoch}, Validation Loss: {valid_loss}')
         logging.info(f'Epoch {epoch}, Validation Loss: {valid_loss}')
     else:
-        print(f'Test Loss: {valid_loss}, Accuracy: {v_total["accuracy"] / batch_itr}, Precision: {v_total["precision"] / batch_itr}, '
-              f'Recall: {v_total["recall"] / batch_itr}, Accuracy Free: {v_total["acc_free"] / batch_itr} F1: {v_total["f1"] / batch_itr}, '
-              f'ROC AUC: {float(np.mean(v_roc)) if len(v_roc) > 0 else "N/A"}')
+        print(f'Test Loss: {valid_loss}, Accuracy: {m["accuracy"]}, Precision: {m["precision"]}, '
+              f'Recall: {m["recall"]}, Accuracy Free: {m["acc_free"]} F1: {m["f1"]}, '
+              f'ROC AUC: {m["roc_auc"] if m["roc_auc"] is not None else "N/A"}')
 
     return valid_loss
 

@@ -1,4 +1,5 @@
 import random
+from copy import deepcopy
 
 import numpy
 import torch
@@ -80,24 +81,27 @@ class OGMDataset(Dataset):
         # load json files from annotations path
         annotation_files = [f for f in os.listdir(self.annotations_path) if f.endswith('.json')]
 
+        self.obs_data_dict = {}
+
+        # Check data file exists
+        observation_file_path = Path(os.path.join(self.input_path, filename))
+        logger.info("Loading Observations and OGM data from {}", observation_file_path)
+        self.obs_data_dict = pickle.load(open(observation_file_path, "rb"))
+
+        # Loading background images
+        for scene_id in scene_ids:
+            if int(scene_id) < start_scene or int(scene_id) > end_scene:
+                continue
+
+            # Store background images for scenes
+            bg_path = os.path.join(self.input_path, 'semantic_maps', f"{scene_id}_background.png")
+            img = cv2.imread(bg_path)
+            self.background_images[int(scene_id)] = img
+
+        # load json files from annotations path
+        annotation_files = [f for f in os.listdir(self.annotations_path) if f.endswith('.json')]
+
         label_dict = {}
-
-        # Creating a balanced dataset
-        # First find out training data with positive cells
-        files_with_positive_cells = []
-        for file in annotation_files:
-            key = file.split('.')[0]
-            with open(os.path.join(self.annotations_path, file), 'r') as f:
-                data = json.load(f)
-                for cell in data:
-                    if cell['label'] == 1:
-                        files_with_positive_cells.append(key)
-                        break
-
-        random_positive_keys = np.random.choice(files_with_positive_cells,
-                                                min(int(len(annotation_files)/2), len(files_with_positive_cells)),
-                                                replace=False)
-
         for file in annotation_files:
             key = file.split('.')[0]
             scene_id = int(key.split('_')[0])
@@ -110,12 +114,12 @@ class OGMDataset(Dataset):
                 normalised_data = []
                 hidden_ogm_cells_xys = []
                 for cell in data:
-                    normalised_data.append([cell['cx'] / (self.background_images[scene_id].shape[1] -1),
-                                           cell['cy'] / (self.background_images[scene_id].shape[0] - 1),
-                                           cell['label']])
+                    normalised_data.append([cell['cx'] / (self.background_images[scene_id].shape[1] - 1),
+                                            cell['cy'] / (self.background_images[scene_id].shape[0] - 1),
+                                            cell['label']])
 
-                    # observation data for ego vehicle at current frame also stored using the same key in data_dict
-                    ego_vehicle_data = self.data_dict[key]["historical_ego_obs"][-1]
+                    # observation data for ego vehicle at current frame also stored using the same key in obs_data_dict
+                    ego_vehicle_data = self.obs_data_dict[key]["historical_ego_obs"][-1]
                     hidden_ogm_cell_xy = get_vert(cell['cx'], cell['cy'], ego_vehicle_data[2], length=20.0, width=20.0)
                     hidden_ogm_cells_xys.append(hidden_ogm_cell_xy)
 
@@ -127,51 +131,35 @@ class OGMDataset(Dataset):
         self.label_dict = label_dict
 
         keys = list(label_dict.keys())  # These are the frame keys selected for training/testing
+        data_dict = {}
         for key in keys:
-            data_dict = self.data_dict[key]
+            obs_data_dict = self.obs_data_dict[key]
             ogm_cells, ogm_cells_xys = label_dict[key]
 
-            # check how many adjacent agents are there
-            historical_adjacent_obs = data_dict["historical_adjacent_obs"]
-            num_adjacent_agents = len(historical_adjacent_obs.keys())
+            historical_adjacent_obs, hidden_ogm_cells = (
+                obs_data_dict["historical_adjacent_obs"], obs_data_dict["hidden_ogm_cells"])
+            last_recorded_t = {}
+            for i, (veh_index, obs) in enumerate(historical_adjacent_obs.items()):
+                # Find the index of the last non-zero observation obs np array
+                mask = np.any(np.array(obs) != 0, axis=1)
+                last_t = np.where(mask)[0].max() if np.any(mask) else None
+                last_recorded_t[veh_index] = last_t
 
-            # if there are less than 5 adjacent agents, remove that entry from label dict and data dict
-            # Find moving agents. This is only used in ablation studies
-            # historical_obs = np.array((list(historical_adjacent_obs.values())))
-            # speeds_x = historical_obs[:, :, 3]  # Assuming speed in x is at index 3
-            # speeds_y = historical_obs[:, :, 4]  # Assuming speed in y is at index 4
-            # # if any agent has non-zero speed at any time step, consider it moving
-            # moving_agents = np.where(np.any((speeds_x != 0) | (speeds_y != 0), axis=1))[0]
-            # num_moving_agents = len(moving_agents)
+            for i, (cell, cell_xyz) in enumerate(zip(ogm_cells, ogm_cells_xys)):
+                data_dict[key + "_" + str(i)] = deepcopy(obs_data_dict)
+                cell_arr = [cell]
+                cell_xyz_arr = [cell_xyz]
+                # Extract distances for hidden ogm cells from adjacent tracks (This is a bi-partition graph)
+                edge_weights, edge_index = feature_builder.extract_edge_info(historical_adjacent_obs, cell_arr, last_recorded_t)
 
-            if key in random_positive_keys:
-                positive_indices = []
-                for i, cell in enumerate(ogm_cells):
-                    if cell[2] == 1:  # checking the label
-                        positive_indices.append(i)
+                data_dict[key + "_" + str(i)]["edge_weights"] = edge_weights
+                data_dict[key + "_" + str(i)]["edge_index"] = edge_index
+                data_dict[key + "_" + str(i)]["hidden_ogm_cells"] = np.array(cell_arr, dtype=np.float32)
+                data_dict[key + "_" + str(i)]["hidden_cell_polygon_xys"] = np.array(cell_xyz_arr, dtype=np.float32)
 
-                random_index = random.choice(positive_indices)
+        self.data_dict = data_dict
 
-            else:
-                random_index = random.randint(0, len(label_dict[key][0]) - 1)
-
-            ogm_cells = [ogm_cells[random_index]]
-            ogm_cells_xys = [ogm_cells_xys[random_index]]
-
-            historical_adjacent_obs, hidden_ogm_cells = (data_dict["historical_adjacent_obs"], data_dict["hidden_ogm_cells"])
-            last_recorded_t = feature_builder.compute_last_recorded_t(historical_adjacent_obs)
-
-            # Extract distances for hidden ogm cells from adjacent tracks (This is a bi-partition graph)
-            edge_weights, edge_index = feature_builder.extract_edge_info(historical_adjacent_obs, ogm_cells,
-                                                                         last_recorded_t)
-
-            data_dict["edge_weights"] = edge_weights
-            data_dict["edge_index"] = edge_index
-            data_dict["hidden_ogm_cells"] = np.array(ogm_cells, dtype=np.float32)
-            data_dict["hidden_cell_polygon_xys"] = np.array(ogm_cells_xys, dtype=np.float32)
-            self.data_dict[key] = data_dict
-
-        self.keys = list(self.label_dict.keys())
+        self.keys = list(self.data_dict.keys())
         print("Done Loading")
 
     def __len__(self):

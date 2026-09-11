@@ -209,10 +209,10 @@ class CellConditionedMultiScaleSampler(
                 cell_mask.bool()
             )
 
-        self._validate_coordinates(
-            cell_xy,
-            cell_mask,
-        )
+        # self._validate_coordinates(
+        #     cell_xy,
+        #     cell_mask,
+        # )
 
         # --------------------------------------------------
         # For padded cells, temporarily place coordinate

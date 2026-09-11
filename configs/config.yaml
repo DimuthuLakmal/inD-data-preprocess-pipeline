@@ -2,8 +2,9 @@
 model:
   lr: 0.0005 # learning rate
   use_lr_scheduler: True # if you want to use learning rate scheduler
-  train_batch_size: 4
-  test_batch_size: 4
+  save_checkpoints: True # HPO trials set this False to avoid writing a checkpoint every epoch
+  train_batch_size: 8
+  test_batch_size: 8
   train_epochs: 150
   model_output_path: "../results/checkpoints/epoch_{}.pt"
   load_saved_model: False # if you want pre-trained model weights to be loaded

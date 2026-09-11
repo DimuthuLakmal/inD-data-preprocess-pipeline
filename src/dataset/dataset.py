@@ -7,7 +7,7 @@ from torch.utils.data import Dataset
 
 from src.utils.ogm_util import create_OGM_ego, get_vert
 from src.dataset import feature_builder
-from src.utils.semantic_maps import semantic_map_to_one_hot
+from src.utils.semantic_maps import semantic_map_to_one_hot, SEMANTIC_PALETTE_BGR
 
 import json
 import cv2
@@ -18,19 +18,6 @@ import os
 
 from loguru import logger
 import pickle
-
-
-SEMANTIC_PALETTE_BGR = {
-    'fixed_blocks': (0, 255, 0),
-    'walking_path': (255, 0, 0),
-    'vegetation': (255, 0, 150),
-    'road': (0, 0, 255),
-    'lines': (255, 255, 255),
-    'pedestrian_crossing': (255, 150, 0),
-    'parking': (0, 255, 255),
-    'refuge_island': (90, 90, 90),
-    'background': (0, 0, 0)
-}
 
 
 class OGMDataset(Dataset):
@@ -138,6 +125,15 @@ class OGMDataset(Dataset):
 
             historical_adjacent_obs, hidden_ogm_cells = (
                 obs_data_dict["historical_adjacent_obs"], obs_data_dict["hidden_ogm_cells"])
+
+            # check how many adjacent agents are there
+            num_adjacent_agents = len(historical_adjacent_obs.keys())
+
+            # if there are less than 5 adjacent agents, remove that entry from label dict and data dict
+            if num_adjacent_agents > 4:
+                del self.data_dict[key]
+                continue
+
             last_recorded_t = {}
             for i, (veh_index, obs) in enumerate(historical_adjacent_obs.items()):
                 # Find the index of the last non-zero observation obs np array
@@ -167,7 +163,7 @@ class OGMDataset(Dataset):
         print("Done Loading")
 
     def __len__(self):
-        return len(self.label_dict)
+        return len(self.data_dict)
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):

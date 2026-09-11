@@ -1,0 +1,56 @@
+data:
+  dataset: ind
+  dataset_dir: ../data/
+  end_scene: 24
+  history_length: 20
+  label_dir: ../data/annotations/
+  num_features: 9
+  num_workers: 1
+  observation_data_filename: data.pkl
+  start_scene: 0
+  visualizer_params_dir: ../data/visualizer_params/
+model:
+  device: cuda
+  gat:
+    dim_cell_model: 32
+    dim_edge: 1
+    dim_model: 32
+    dim_obs_model: 32
+    dropout: 0.2
+    num_heads: 3
+    ogm_input_dim: 2
+  load_saved_model: false
+  log_file: ../results/app_{}.log
+  lr: 0.0005
+  map_encoder:
+    architecture: regnet_y_800mf
+    cell_node_dim: 32
+    dropout: 0.1
+    freeze_backbone: false
+    map_context_dim: 64
+    num_semantic_classes: 9
+    pretrained: true
+    projection_dim: 32
+    stem_init: random
+  model_input_path: output/model/pems08/epoch_58_model.pt
+  model_output_path: ../results/checkpoints/regnety_stsbgat.pt
+  obs_temporal_encoder:
+    dim_model: 32
+    dropout: 0.05
+    input_dim: 10
+    num_heads: 8
+    num_layers: 4
+    seq_len: 21
+  save_checkpoints: true
+  tb_log_dir: ../results/runs/
+  test_batch_size: 4
+  train_batch_size: 4
+  train_epochs: 150
+  use_lr_scheduler: true
+  z_temporal_encoder:
+    dim_model: 32
+    dropout: 0.05
+    input_dim: 10
+    num_heads: 8
+    num_layers: 4
+    seq_len: 21

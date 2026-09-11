@@ -3,11 +3,7 @@ import torch
 import grpc
 
 from src.dataset import feature_builder
-from src.utils.ogm_util import get_vert
 from src.serving.generated import ogm_inference_pb2, ogm_inference_pb2_grpc
-
-CELL_LENGTH = 20.0
-CELL_WIDTH = 20.0
 
 
 class OGMInferenceServicer(ogm_inference_pb2_grpc.OGMInferenceServiceServicer):
@@ -17,9 +13,10 @@ class OGMInferenceServicer(ogm_inference_pb2_grpc.OGMInferenceServiceServicer):
     all of the request's occluded cells in a single forward pass.
     """
 
-    def __init__(self, model, background_images, history_length, device):
+    def __init__(self, model, background_images, semantic_maps, history_length, device):
         self.model = model
         self.background_images = background_images
+        self.semantic_maps = semantic_maps
         self.history_length = history_length
         self.device = device
 
@@ -48,11 +45,7 @@ class OGMInferenceServicer(ogm_inference_pb2_grpc.OGMInferenceServiceServicer):
         last_recorded_t = feature_builder.compute_last_recorded_t(historical_adjacent_obs)
 
         cells_xy_norm = [
-            [cell.cx / background_img.shape[1], cell.cy / background_img.shape[0]]
-            for cell in request.cells
-        ]
-        cell_polygons = [
-            get_vert(cell.cx, cell.cy, request.ego_heading_deg, length=CELL_LENGTH, width=CELL_WIDTH)
+            [cell.cx / (background_img.shape[1] - 1), cell.cy / (background_img.shape[0] - 1)]
             for cell in request.cells
         ]
 
@@ -60,7 +53,7 @@ class OGMInferenceServicer(ogm_inference_pb2_grpc.OGMInferenceServiceServicer):
             historical_adjacent_obs, cells_xy_norm, last_recorded_t)
         historical_adjacent_input, seq_mask = feature_builder.build_vehicle_tensor(
             historical_adjacent_obs, request.scene_id)
-        map_obs = feature_builder.build_map_obs(background_img, cell_polygons)
+        map_obs = self.semantic_maps[request.scene_id]
 
         inputs = self._to_batch_of_one(
             historical_adjacent_input, seq_mask, cells_xy_norm, map_obs, edge_weights, edge_index)

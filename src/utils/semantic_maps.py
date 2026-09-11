@@ -6,6 +6,19 @@ import numpy as np
 import torch
 
 
+SEMANTIC_PALETTE_BGR = {
+    'fixed_blocks': (0, 255, 0),
+    'walking_path': (255, 0, 0),
+    'vegetation': (255, 0, 150),
+    'road': (0, 0, 255),
+    'lines': (255, 255, 255),
+    'pedestrian_crossing': (255, 150, 0),
+    'parking': (0, 255, 255),
+    'refuge_island': (90, 90, 90),
+    'background': (0, 0, 0)
+}
+
+
 def discover_semantic_colors(
     image_path: str,
     top_k: int = 30,

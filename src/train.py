@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 from datetime import datetime
 
 import numpy as np
@@ -44,6 +45,8 @@ def train(model, train_data_loader, valid_data_loader, config):
     log_dir = config['model']['tb_log_dir']
     writer = SummaryWriter(log_dir=log_dir)
     global_step = 0
+
+    save_ckpt = config['model'].get('save_checkpoints', True)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config['model']['lr'])
     optimizer.zero_grad()
@@ -163,13 +166,15 @@ def train(model, train_data_loader, valid_data_loader, config):
         logging.info(f'Epoch {epoch}, Validation Loss: {valid_loss}')
 
         # Save model checkpoint
-        model_path = config['model']['model_output_path']
-        torch.save(model.state_dict(), model_path.format(epoch))
+        if save_ckpt:
+            model_path = config['model']['model_output_path']
+            torch.save(model.state_dict(), model_path.format(epoch))
 
         if valid_loss < best_loss:
             best_loss = valid_loss
-            best_path = "../results/checkpoints/best.pt"
-            torch.save(model.state_dict(), best_path.format(epoch))
+            if save_ckpt:
+                best_path = os.path.join(os.path.dirname(config['model']['model_output_path']), "best.pt")
+                torch.save(model.state_dict(), best_path)
             print(f'New best model saved at epoch {epoch} with validation loss {best_loss}')
             logging.info(f'New best model saved at epoch {epoch} with validation loss {best_loss}')
 
@@ -180,11 +185,14 @@ def train(model, train_data_loader, valid_data_loader, config):
     writer.close()
 
     # Save the final model checkpoint
-    torch.save(model.state_dict(), config['model']['model_output_path'].format('final'))
+    if save_ckpt:
+        torch.save(model.state_dict(), config['model']['model_output_path'].format('final'))
+
+    return best_loss
 
 
 if __name__ == '__main__':
-    with open("../configs/config.yaml", "r") as stream:
+    with open("../configs/config_convnext.yaml", "r") as stream:
         config = yaml.safe_load(stream)
         config['data']['batch_size'] = config['model']['train_batch_size']
 

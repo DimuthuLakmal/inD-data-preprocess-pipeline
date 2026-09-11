@@ -47,7 +47,7 @@ def build_request(ds, key):
 
     req = ogm_inference_pb2.PredictOccupancyRequest(scene_id=scene_id, ego_heading_deg=float(ego_heading))
     for cell in ogm_cells:
-        req.cells.add(cx=float(cell[0] * bg_img.shape[1]), cy=float(cell[1] * bg_img.shape[0]))
+        req.cells.add(cx=float(cell[0] * (bg_img.shape[1] - 1)), cy=float(cell[1] * (bg_img.shape[0] - 1)))
 
     for track_id, obs in raw_hist.items():
         vehicle = req.vehicles.add(track_id=str(track_id))

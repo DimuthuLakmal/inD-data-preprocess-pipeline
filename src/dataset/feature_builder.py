@@ -11,6 +11,8 @@ from typing import Tuple
 import cv2
 import numpy as np
 
+from src.utils.semantic_maps import semantic_map_to_one_hot, SEMANTIC_PALETTE_BGR
+
 
 def load_background_images(dataset_dir, scene_ids, start_scene=None, end_scene=None):
     """
@@ -30,6 +32,23 @@ def load_background_images(dataset_dir, scene_ids, start_scene=None, end_scene=N
         background_images[scene_id_int] = img
 
     return background_images
+
+
+def load_semantic_maps(background_images, output_size=(224, 224)):
+    """
+    Converts each already-loaded background image into the one-hot semantic class map
+    [K,H,W] the model expects as `map_obs`, matching OGMDataset.load_maps exactly. Takes
+    the same dict `load_background_images` returns, so its key set (scene_id -> image) is
+    always in sync with `background_images` by construction - no separate scene-range
+    filtering or NOT_FOUND bookkeeping needed downstream.
+    """
+    semantic_maps = {}
+    for scene_id, img in background_images.items():
+        one_hot, _, _ = semantic_map_to_one_hot(
+            image_bgr=img, palette_bgr=SEMANTIC_PALETTE_BGR, output_size=output_size)
+        semantic_maps[scene_id] = one_hot
+
+    return semantic_maps
 
 
 def compute_last_recorded_t(historical_adjacent_obs):
@@ -100,15 +119,3 @@ def build_vehicle_tensor(historical_adjacent_obs, scene_id):
                                                 historical_adjacent_obs[:, :, 10:11]), axis=-1)
 
     return historical_adjacent_input, seq_mask
-
-
-def build_map_obs(background_img, cell_polygons, size=(224, 224)):
-    """
-    Draws each cell polygon (Nx2 pixel-coord arrays, as returned by ogm_util.get_vert) onto
-    a copy of the scene's background image and resizes it for MapEncoder.
-    """
-    map_img = background_img.copy()
-    for polygon in cell_polygons:
-        cv2.fillPoly(map_img, [np.array(polygon).astype(np.int32)], (0, 102, 204))
-
-    return cv2.resize(map_img, size, interpolation=cv2.INTER_AREA)

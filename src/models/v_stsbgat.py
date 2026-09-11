@@ -22,11 +22,11 @@ class VSTSBGT(nn.Module):
 
         ze_configs = configs['z_temporal_encoder']
         ze_configs['device'] = self.device
-        self.z_encoder = TemporalEncoder(d_in=te_configs['input_dim'],
-                                         d_model=te_configs['dim_model'],
-                                         nhead=te_configs['num_heads'],
-                                         num_layers=te_configs['num_layers'],
-                                         dropout=te_configs['dropout'])
+        self.z_encoder = TemporalEncoder(d_in=ze_configs['input_dim'],
+                                         d_model=ze_configs['dim_model'],
+                                         nhead=ze_configs['num_heads'],
+                                         num_layers=ze_configs['num_layers'],
+                                         dropout=ze_configs['dropout'])
 
         gat_configs = configs['gat']
         self.gat_layer = GATLayer(gat_configs)

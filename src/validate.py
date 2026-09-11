@@ -7,13 +7,16 @@ import numpy as np
 import torch
 import torch.nn as nn
 import cv2
-from fvcore.nn import FlopCountAnalysis
 import time
 
 from src.utils.metrics import accumulate_counts, compute_metrics_from_counts
 
 
-def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False):
+def percentile(values, p):
+    return float(np.percentile(values, p))
+
+
+def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False, warmup_batches=10):
     # Loading background images
     background_images = {}
     for scene_id in [0, 7, 8, 18, 19]:
@@ -26,7 +29,13 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False)
 
     loss_fn_aggregated = nn.BCEWithLogitsLoss(reduction='none')
 
-    times = []
+    using_cuda = torch.device(device).type == "cuda"
+    if using_cuda:
+        torch.cuda.reset_peak_memory_stats(device)
+        torch.cuda.synchronize(device)
+
+    latencies_ms = []
+    n_timed_samples = 0
 
     with torch.no_grad():  # Example: 10 epochs
 
@@ -36,6 +45,11 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False)
         y_true_all = []
         y_prob_all = []
         batch_itr = 0
+
+        edge_dropped_per_head = None  # lazily-sized torch.float64 [H] once H is known
+        edge_total = 0.0
+
+        wall_start = time.perf_counter()
 
         for batch_idx, (inputs, target) in enumerate(valid_data_loader):
 
@@ -51,18 +65,33 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False)
                     targets != 3).squeeze()  # Cells occupied with fixed blocks are marked with a 3 in the target
             mask = mask * mask_fixed_blocks  # Consider cells occupied with fixed blocks as not padded
 
-            start_time = time.time()
-            outputs, gates, l2_loss, z_masks = model(inputs)
-            end_time = time.time()
+            if using_cuda:
+                torch.cuda.synchronize(device)
+            batch_start = time.perf_counter()
 
-            # print(f'Inference Time for batch {batch_idx}: {(end_time - start_time) * 1000} ms')
-            times.append((end_time - start_time) * 1000)
+            outputs, gates, l2_loss, z_masks = model(inputs)
+
+            if using_cuda:
+                torch.cuda.synchronize(device)
+            batch_end = time.perf_counter()
+
+            if batch_idx >= warmup_batches:
+                latencies_ms.append((batch_end - batch_start) * 1000.0)
+                n_timed_samples += target.shape[0]
+
+            # z_masks: list of [E_i, H] per-edge, per-head L0 gates (one entry per sample -
+            # edge count varies per sample). z == 0 means that edge/head was fully gated out
+            # (exact, via the hardtanh clamp in sgat_utils.py) - a real dropped edge, not a
+            # thresholding guess.
+            for zm in z_masks:
+                zm = zm.detach()
+                if edge_dropped_per_head is None:
+                    edge_dropped_per_head = torch.zeros(zm.shape[1], dtype=torch.float64)
+                edge_dropped_per_head += (zm == 0).sum(dim=0).cpu().double()
+                edge_total += zm.shape[0]
 
             outputs = outputs.squeeze()
             outputs_sig = nn.Sigmoid()(outputs)
-
-            # flops = FlopCountAnalysis(model, inputs)
-            # print("Total FLOPs: ", flops.total())
 
             # Calculate the binary cross-entropy loss
             targets = targets.squeeze() * mask
@@ -139,6 +168,8 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False)
             #
             #             cv2.imwrite(f'../results/edge_masks/{batch_idx}_{b_i}_{h}.png', map_img_t)
 
+        wall_elapsed = time.perf_counter() - wall_start
+
     valid_loss = loss_sum / max(mask_count_sum, 1)
     m = compute_metrics_from_counts(
         tp_sum, fp_sum, fn_sum, tn_sum,
@@ -146,7 +177,33 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False)
         y_prob=np.concatenate(y_prob_all) if y_prob_all else None,
     )
 
-    print(f'Average Inference Time per batch: {np.mean(times)} ms, Std Dev: {np.std(times)} ms')
+    if edge_total > 0:
+        edge_drop_pct_per_head = (edge_dropped_per_head / edge_total * 100).tolist()
+        edge_drop_pct_overall = float(
+            edge_dropped_per_head.sum() / (edge_total * edge_dropped_per_head.numel()) * 100)
+    else:
+        edge_drop_pct_per_head, edge_drop_pct_overall = [], None
+
+    latencies_ms = np.array(latencies_ms, dtype=np.float64)
+    timed_elapsed_s = latencies_ms.sum() / 1000.0
+    profile = {
+        "num_batches_total": batch_itr,
+        "num_batches_warmup": min(warmup_batches, batch_itr),
+        "num_batches_timed": int(latencies_ms.shape[0]),
+        "num_samples_timed": n_timed_samples,
+        "latency_ms_mean": float(latencies_ms.mean()) if latencies_ms.size else float("nan"),
+        "latency_ms_std": float(latencies_ms.std()) if latencies_ms.size else float("nan"),
+        "latency_ms_min": float(latencies_ms.min()) if latencies_ms.size else float("nan"),
+        "latency_ms_p50": percentile(latencies_ms, 50) if latencies_ms.size else float("nan"),
+        "latency_ms_p95": percentile(latencies_ms, 95) if latencies_ms.size else float("nan"),
+        "latency_ms_p99": percentile(latencies_ms, 99) if latencies_ms.size else float("nan"),
+        "latency_ms_max": float(latencies_ms.max()) if latencies_ms.size else float("nan"),
+        "throughput_samples_per_sec": (n_timed_samples / timed_elapsed_s) if timed_elapsed_s > 0 else float("nan"),
+        "wall_clock_total_sec": wall_elapsed,
+    }
+    if using_cuda:
+        profile["peak_gpu_memory_allocated_mb"] = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
+        profile["peak_gpu_memory_reserved_mb"] = torch.cuda.max_memory_reserved(device) / (1024 ** 2)
 
     if not test:
         writer.add_scalar("val/loss_epoch", valid_loss, epoch)
@@ -157,13 +214,46 @@ def evaluate(model, valid_data_loader, device, writer=None, epoch=0, test=False)
         writer.add_scalar("val/f1_epoch", m["f1"], epoch)
         if m["roc_auc"] is not None:
             writer.add_scalar("val/roc_auc_epoch", m["roc_auc"], epoch)
+        if edge_drop_pct_overall is not None:
+            writer.add_scalar("val/edge_drop_pct_overall", edge_drop_pct_overall, epoch)
+            for h, pct in enumerate(edge_drop_pct_per_head):
+                writer.add_scalar(f"val/edge_drop_pct_head{h}", pct, epoch)
 
         print(f'Epoch {epoch}, Validation Loss: {valid_loss}')
         logging.info(f'Epoch {epoch}, Validation Loss: {valid_loss}')
     else:
+        edge_drop_str = (f'{edge_drop_pct_overall:.2f}%, per-head: '
+                         f'{[f"{p:.2f}%" for p in edge_drop_pct_per_head]}'
+                         if edge_drop_pct_overall is not None else "N/A")
+
+        print("\n" + "-" * 50)
+        print("Task metrics")
+        print("-" * 50)
         print(f'Test Loss: {valid_loss}, Accuracy: {m["accuracy"]}, Precision: {m["precision"]}, '
               f'Recall: {m["recall"]}, Accuracy Free: {m["acc_free"]} F1: {m["f1"]}, '
-              f'ROC AUC: {m["roc_auc"] if m["roc_auc"] is not None else "N/A"}')
+              f'ROC AUC: {m["roc_auc"] if m["roc_auc"] is not None else "N/A"}, '
+              f'Edge Drop % (overall): {edge_drop_str}')
+
+        print("\n" + "-" * 50)
+        print("Performance profile")
+        print("-" * 50)
+        print(
+            f"batches: {profile['num_batches_total']} (warmup {profile['num_batches_warmup']}, "
+            f"timed {profile['num_batches_timed']})"
+        )
+        print(
+            f"latency (ms): mean {profile['latency_ms_mean']:.2f} | std {profile['latency_ms_std']:.2f} | "
+            f"P50 {profile['latency_ms_p50']:.2f} | P95 {profile['latency_ms_p95']:.2f} | "
+            f"P99 {profile['latency_ms_p99']:.2f} | min {profile['latency_ms_min']:.2f} | "
+            f"max {profile['latency_ms_max']:.2f}"
+        )
+        print(f"throughput: {profile['throughput_samples_per_sec']:.2f} samples/sec")
+        print(f"wall clock total: {profile['wall_clock_total_sec']:.2f} s")
+        if "peak_gpu_memory_allocated_mb" in profile:
+            print(
+                f"peak GPU memory: {profile['peak_gpu_memory_allocated_mb']:.1f} MB allocated / "
+                f"{profile['peak_gpu_memory_reserved_mb']:.1f} MB reserved"
+            )
 
     return valid_loss
 

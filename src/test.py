@@ -23,11 +23,16 @@ def create_args():
     cs.add_argument('--dataset', default="ind",
                     help="The dataset to use for training and testing",
                     type=str)
+    cs.add_argument('--warmup_batches', default=10,
+                    help="Number of initial batches excluded from latency/throughput stats.",
+                    type=int)
 
     return vars(cs.parse_args())
 
 
 if __name__ == '__main__':
+    args = create_args()
+
     with open("../configs/config_convnext.yaml", "r") as stream:
         config = yaml.safe_load(stream)
         config['data']['batch_size'] = config['model']['test_batch_size']
@@ -38,5 +43,6 @@ if __name__ == '__main__':
     model.load_state_dict(torch.load(config['model']['model_output_path']))  # 144 for full model
     model = model.to(config['model']["device"])
 
-    test_loss = evaluate(model, valid_dataloader, config['model']["device"], test=True)
+    test_loss = evaluate(model, valid_dataloader, config['model']["device"], test=True,
+                          warmup_batches=args['warmup_batches'])
     print(f'Validation loss {test_loss}')

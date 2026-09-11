@@ -192,7 +192,7 @@ def train(model, train_data_loader, valid_data_loader, config):
 
 
 if __name__ == '__main__':
-    with open("../configs/config_best.yaml", "r") as stream:
+    with open("../configs/config_convnext.yaml", "r") as stream:
         config = yaml.safe_load(stream)
         config['data']['batch_size'] = config['model']['train_batch_size']
 

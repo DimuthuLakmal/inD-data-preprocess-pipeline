@@ -26,6 +26,11 @@ def create_args():
     cs.add_argument('--warmup_batches', default=10,
                     help="Number of initial batches excluded from latency/throughput stats.",
                     type=int)
+    cs.add_argument('--compile', action='store_true',
+                    help="Compile the model with torch.compile before running inference.")
+    cs.add_argument('--compile_mode', default='default',
+                    choices=['default', 'reduce-overhead', 'max-autotune'],
+                    help="torch.compile mode to use when --compile is set.")
 
     return vars(cs.parse_args())
 
@@ -37,11 +42,15 @@ if __name__ == '__main__':
         config = yaml.safe_load(stream)
         config['data']['batch_size'] = config['model']['test_batch_size']
 
+    model = VSTSBGT(config['model']).to(config['model']["device"])
+    model.load_state_dict(torch.load(config['model']['model_output_path'].format(0)))  # 144 for full model
+    model = model.to(config['model']["device"])
+
     valid_dataloader = OGMDataLoader(config['data'], phase='test').create_dataloader()
 
-    model = VSTSBGT(config['model']).to(config['model']["device"])
-    model.load_state_dict(torch.load(config['model']['model_output_path']))  # 144 for full model
-    model = model.to(config['model']["device"])
+    if args['compile']:
+        print(f"Compiling model with torch.compile(mode='{args['compile_mode']}')...")
+        model = torch.compile(model, dynamic=True, mode=args['compile_mode'])
 
     test_loss = evaluate(model, valid_dataloader, config['model']["device"], test=True,
                           warmup_batches=args['warmup_batches'])

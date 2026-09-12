@@ -43,7 +43,7 @@ model:
     seq_len: 21
   save_checkpoints: true
   tb_log_dir: ../results/runs/
-  test_batch_size: 1
+  test_batch_size: 8
   train_batch_size: 8
   train_epochs: 150
   use_lr_scheduler: true

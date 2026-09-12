@@ -5,7 +5,7 @@ model:
   save_checkpoints: True # HPO trials set this False to avoid writing a checkpoint every epoch
   train_batch_size: 8
   test_batch_size: 8
-  train_epochs: 150
+  train_epochs: 100
   model_output_path: "../results/checkpoints/epoch_{}.pt"
   load_saved_model: False # if you want pre-trained model weights to be loaded
   model_input_path: "output/model/pems08/epoch_58_model.pt" # pretrained model path

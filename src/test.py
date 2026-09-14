@@ -38,12 +38,12 @@ def create_args():
 if __name__ == '__main__':
     args = create_args()
 
-    with open("../configs/config_convnext.yaml", "r") as stream:
+    with open("../configs/config_all_scenes_convnext.yaml", "r") as stream:
         config = yaml.safe_load(stream)
         config['data']['batch_size'] = config['model']['test_batch_size']
 
     model = VSTSBGT(config['model']).to(config['model']["device"])
-    model.load_state_dict(torch.load(config['model']['model_output_path'].format(0)))  # 144 for full model
+    model.load_state_dict(torch.load(config['model']['model_input_path']))  # 144 for full model
     model = model.to(config['model']["device"])
 
     valid_dataloader = OGMDataLoader(config['data'], phase='test').create_dataloader()

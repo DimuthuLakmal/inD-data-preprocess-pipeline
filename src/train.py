@@ -47,6 +47,7 @@ def train(model, train_data_loader, valid_data_loader, config):
     global_step = 0
 
     save_ckpt = config['model'].get('save_checkpoints', True)
+    save_best_ckpt = config['model'].get('save_best_checkpoint', True)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config['model']['lr'])
     optimizer.zero_grad()
@@ -172,7 +173,7 @@ def train(model, train_data_loader, valid_data_loader, config):
 
         if valid_loss < best_loss:
             best_loss = valid_loss
-            if save_ckpt:
+            if save_best_ckpt:
                 best_path = os.path.join(os.path.dirname(config['model']['model_output_path']), "best.pt")
                 torch.save(model.state_dict(), best_path)
             print(f'New best model saved at epoch {epoch} with validation loss {best_loss}')

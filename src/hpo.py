@@ -1,6 +1,7 @@
 import argparse
 import copy
 import os
+import shutil
 
 import optuna
 import yaml
@@ -74,10 +75,43 @@ def build_trial_config(base_config, trial, results_dir, epochs_override):
     config['model']['model_output_path'] = os.path.join(trial_dir, "epoch_{}.pt")
     config['model']['tb_log_dir'] = os.path.join(trial_dir, "runs")
     config['model']['log_file'] = os.path.join(trial_dir, "app_{}.log")
-    config['model']['save_checkpoints'] = False  # only the metric matters during search
+    config['model']['save_checkpoints'] = False  # skip per-epoch saves (only the metric matters)
+    config['model']['save_best_checkpoint'] = True  # but keep this trial's single best-epoch save
 
     config['data']['batch_size'] = config['model']['train_batch_size']
     return config
+
+
+def keep_only_overall_best_checkpoint(trial, trial_value, results_dir):
+    """Keeps at most ONE checkpoint on disk across the whole study - the current
+    best-overall trial's weights - rather than one per trial (which balloons disk usage
+    over many trials). Compares this trial's value against the best of all PREVIOUSLY
+    completed trials (this trial isn't finalized in the study yet while its own
+    objective() call is still running), promotes this trial's checkpoint to the stable
+    path if it's a new best, and always deletes the trial-local copy afterward.
+    """
+    trial_dir = os.path.join(results_dir, f"trial_{trial.number}")
+    trial_ckpt = os.path.join(trial_dir, "best.pt")
+    if not os.path.exists(trial_ckpt):
+        return
+
+    stable_best_path = os.path.normpath(
+        os.path.join(results_dir, "..", "checkpoints", "best_optuna_trial.pt"))
+
+    prior_values = [t.value for t in trial.study.get_trials(deepcopy=False)
+                   if t.state == optuna.trial.TrialState.COMPLETE]
+    prior_best = min(prior_values) if prior_values else None
+
+    if prior_best is None or trial_value <= prior_best:
+        os.makedirs(os.path.dirname(stable_best_path), exist_ok=True)
+        shutil.copy2(trial_ckpt, stable_best_path)
+        print(f"Trial {trial.number} (value={trial_value:.6f}) is the new best - "
+             f"checkpoint saved to {stable_best_path}")
+    else:
+        print(f"Trial {trial.number} (value={trial_value:.6f}) did not beat the current "
+             f"best ({prior_best:.6f}) - discarding its checkpoint to save disk space")
+
+    os.remove(trial_ckpt)  # never keep more than the single promoted checkpoint on disk
 
 
 def objective(trial, base_config, results_dir, epochs_override):
@@ -87,7 +121,9 @@ def objective(trial, base_config, results_dir, epochs_override):
     valid_dataloader = OGMDataLoader(config['data'], phase='validation').create_dataloader()
     model = VSTSBGT(config['model']).to(config['model']["device"])
 
-    return train(model, train_dataloader, valid_dataloader, config)
+    best_loss = train(model, train_dataloader, valid_dataloader, config)
+    keep_only_overall_best_checkpoint(trial, best_loss, results_dir)
+    return best_loss
 
 
 def main():
@@ -126,6 +162,17 @@ def main():
     with open(out_path, "w") as f:
         yaml.safe_dump(best_config, f)
     print(f"Best config written to {out_path}")
+
+    # keep_only_overall_best_checkpoint() already keeps this up to date after every trial -
+    # nothing left to copy here, just report whether one exists.
+    stable_best_path = os.path.normpath(
+        os.path.join(results_dir, "..", "checkpoints", "best_optuna_trial.pt"))
+    if os.path.exists(stable_best_path):
+        print(f"Best-known checkpoint available at {stable_best_path}")
+    else:
+        print(f"No checkpoint available at {stable_best_path} - the current best trial "
+             f"(trial {study.best_trial.number}, value={study.best_value}) predates "
+             f"checkpoint saving and has no saved weights.")
 
 
 if __name__ == '__main__':

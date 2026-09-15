@@ -130,9 +130,9 @@ class OGMDataset(Dataset):
             num_adjacent_agents = len(historical_adjacent_obs.keys())
 
             # if there are less than 5 adjacent agents, remove that entry from label dict and data dict
-            if num_adjacent_agents < 9:
-                del self.data_dict[key]
-                continue
+            # if num_adjacent_agents < 9:
+            #     del self.data_dict[key]
+            #     continue
 
             last_recorded_t = {}
             for i, (veh_index, obs) in enumerate(historical_adjacent_obs.items()):

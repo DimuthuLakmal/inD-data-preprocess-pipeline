@@ -38,7 +38,7 @@ def create_args():
 if __name__ == '__main__':
     args = create_args()
 
-    with open("../configs/config_regnety.yaml", "r") as stream:
+    with open("../configs/config_hpo.yaml", "r") as stream:
         config = yaml.safe_load(stream)
         config['data']['batch_size'] = config['model']['test_batch_size']
 

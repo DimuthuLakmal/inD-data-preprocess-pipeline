@@ -32,8 +32,8 @@ model:
     pretrained: true
     projection_dim: 32
     stem_init: random
-  model_input_path: output/model/pems08/epoch_58_model.pt
-  model_output_path: ../results/checkpoints/regnety_stsbgat.pt
+  model_input_path: ../results/checkpoints/regnety_stsbgat.pt
+  model_output_path: ../results/checkpoints/epoch_{}.pt
   obs_temporal_encoder:
     dim_model: 32
     dropout: 0.05

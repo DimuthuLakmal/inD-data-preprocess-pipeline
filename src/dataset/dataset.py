@@ -93,7 +93,7 @@ class OGMDataset(Dataset):
             key = file.split('.')[0]
             scene_id = int(key.split('_')[0])
 
-            if scene_id not in [0, 7, 8, 18, 19]:
+            if scene_id not in [0, 1, 2, 3, 4, 5, 6, 18, 19, 20, 21, 23]:
                 continue
 
             with open(os.path.join(self.annotations_path, file), 'r') as f:

@@ -4,8 +4,8 @@ model:
   use_lr_scheduler: True # if you want to use learning rate scheduler
   save_checkpoints: True # HPO trials set this False to avoid writing a checkpoint every epoch
   save_best_checkpoint: True # independent of save_checkpoints - controls only the best-so-far save
-  train_batch_size: 8
-  test_batch_size: 8
+  train_batch_size: 16
+  test_batch_size: 16
   train_epochs: 100
   model_output_path: "../results/checkpoints/epoch_{}.pt"
   load_saved_model: False # if you want pre-trained model weights to be loaded

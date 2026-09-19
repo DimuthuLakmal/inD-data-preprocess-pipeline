@@ -8,7 +8,7 @@ model:
   train_epochs: 100
   model_output_path: ../results/checkpoints/epoch_{}.pt
   load_saved_model: false
-  model_input_path: ../results/checkpoints/best_optuna_trial.pt
+  model_input_path: ../results/checkpoints/best_optuna_trial_vstsbgat.pt # this is the model trained on scene 0, 7, 8, 18, 19
   log_file: ../results/app_{}.log
   tb_log_dir: ../results/runs/
   device: cuda

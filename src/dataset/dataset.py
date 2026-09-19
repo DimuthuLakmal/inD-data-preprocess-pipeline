@@ -96,6 +96,9 @@ class OGMDataset(Dataset):
             if scene_id not in [0, 1, 2, 3, 4, 5, 6, 18, 19, 20, 21, 23]:
                 continue
 
+            # if scene_id not in [7, 8, 9]:
+            #     continue
+
             with open(os.path.join(self.annotations_path, file), 'r') as f:
                 data = json.load(f)
                 normalised_data = []
@@ -130,7 +133,7 @@ class OGMDataset(Dataset):
             num_adjacent_agents = len(historical_adjacent_obs.keys())
 
             # if there are less than 5 adjacent agents, remove that entry from label dict and data dict
-            # if num_adjacent_agents < 9:
+            # if num_adjacent_agents > 8:
             #     del self.data_dict[key]
             #     continue
 

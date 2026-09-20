@@ -14,10 +14,14 @@ import numpy as np
 from src.utils.semantic_maps import semantic_map_to_one_hot, SEMANTIC_PALETTE_BGR
 
 
-def load_background_images(dataset_dir, scene_ids, start_scene=None, end_scene=None):
+def load_background_images(dataset_dir, scene_ids, start_scene=None, end_scene=None,
+                           subdir='semantic_maps'):
     """
-    Loads `<dataset_dir>/semantic_maps/<scene_id>_background.png` for each scene id
-    (optionally filtered to [start_scene, end_scene]) into {int(scene_id): BGR uint8 image}.
+    Loads `<dataset_dir>/<subdir>/<scene_id>_background.png` for each scene id (optionally
+    filtered to [start_scene, end_scene]) into {int(scene_id): BGR uint8 image}. Defaults to the
+    `semantic_maps` subfolder (the color-by-class map used throughout training/serving); pass
+    `subdir=''` to instead load `<dataset_dir>/<scene_id>_background.png`, the true
+    aerial/orthophoto image, e.g. for visualization purposes.
     """
     background_images = {}
     for scene_id in scene_ids:
@@ -27,7 +31,7 @@ def load_background_images(dataset_dir, scene_ids, start_scene=None, end_scene=N
         if end_scene is not None and scene_id_int > end_scene:
             continue
 
-        bg_path = os.path.join(dataset_dir, 'semantic_maps', f"{scene_id}_background.png")
+        bg_path = os.path.join(dataset_dir, subdir, f"{scene_id}_background.png")
         img = cv2.imread(bg_path)
         background_images[scene_id_int] = img
 

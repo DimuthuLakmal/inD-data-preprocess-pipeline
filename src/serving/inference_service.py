@@ -2,6 +2,7 @@ import os
 import threading
 
 import cv2
+import imageio
 import numpy as np
 import torch
 import grpc
@@ -15,6 +16,8 @@ EDGE_KEEP_COLOR = (3, 252, 232)
 EDGE_DROP_COLOR = (3, 132, 252)
 VEHICLE_COLOR = (0, 255, 0)
 OCCUPIED_CELL_COLOR = (235, 52, 52)
+MAX_CELLS_PER_FRAME = 3  # cap rows per grid frame
+HEADER_HEIGHT = 40
 
 
 class OGMInferenceServicer(ogm_inference_pb2_grpc.OGMInferenceServiceServicer):
@@ -25,23 +28,33 @@ class OGMInferenceServicer(ogm_inference_pb2_grpc.OGMInferenceServiceServicer):
     """
 
     def __init__(self, model, background_images, semantic_maps, history_length, device,
-                viz_output_dir="../results/serving_visualizations"):
+                viz_output_dir="../results/serving_visualizations", true_map_images=None):
         self.model = model
         self.background_images = background_images
         self.semantic_maps = semantic_maps
         self.history_length = history_length
         self.device = device
-        self.viz_output_dir = viz_output_dir
+        # Used only as the visualization canvas (real aerial photo); background_images (the
+        # color-by-class semantic map) remains what coordinate-normalization math is based on,
+        # and is the fallback here if a scene has no true-map image loaded.
+        self.true_map_images = true_map_images or {}
+
+        # One running video for the server's lifetime, one frame per call that has at least one
+        # occupied cell (calls with none are skipped, contributing no frame). A GIF's per-frame
+        # duration is unreliably honored by many viewers (plays back much faster than set), so
+        # this is an actual mp4 with an explicit fps instead. Frames are kept in memory and the
+        # whole file is rewritten after every call - that makes the file appear and stay current
+        # immediately while the server runs, at the cost of O(frames-so-far) work per call; fine
+        # for a debug/analysis tool.
+        os.makedirs(viz_output_dir, exist_ok=True)
+        self._video_path = os.path.join(viz_output_dir, "simulation.mp4")
+        self._video_fps = 0.5  # 1 frame every 2s - adjust to taste
+        self._frames = []
+        self._frame_size = None  # (W, H) of the first frame - video requires every frame to match
         self._call_counter = 0
-        self._counter_lock = threading.Lock()
+        self._lock = threading.Lock()
 
     def PredictOccupancy(self, request, context):
-        with self._counter_lock:
-            self._call_counter += 1
-            call_id = self._call_counter
-        call_dir = os.path.join(self.viz_output_dir, f"call_{call_id:05d}")
-        os.makedirs(call_dir, exist_ok=True)
-
         background_img = self.background_images.get(request.scene_id)
         if background_img is None:
             context.abort(grpc.StatusCode.NOT_FOUND, f"Unknown scene_id: {request.scene_id}")
@@ -86,56 +99,106 @@ class OGMInferenceServicer(ogm_inference_pb2_grpc.OGMInferenceServiceServicer):
         z_mask = _z_mask[0]  # batch-of-one: single bipartite graph per call
 
         response = ogm_inference_pb2.PredictOccupancyResponse()
+        occupied_indices = []
         for i, (cell, prob) in enumerate(zip(request.cells, probs)):
             is_occupied = bool(prob >= 0.2)
             response.predictions.add(
                 cx=cell.cx, cy=cell.cy,
                 occupancy_probability=float(prob),
                 is_occupied=is_occupied)
-
             if is_occupied:
-                self._draw_cell_edges(call_dir, i, cell, background_img,
-                                      historical_adjacent_obs, last_recorded_t,
-                                      z_mask, edge_index)
+                occupied_indices.append(i)
+
+        if occupied_indices:
+            canvas = self.true_map_images.get(request.scene_id, background_img)
+            grid = self._build_head_mask_grid(occupied_indices[:MAX_CELLS_PER_FRAME], request.cells,
+                                              canvas, historical_adjacent_obs, last_recorded_t,
+                                              z_mask, edge_index)
+            self._append_frame(grid)
+
         return response
 
-    @staticmethod
-    def _draw_cell_edges(call_dir, cell_idx, cell, background_img, historical_adjacent_obs,
-                         last_recorded_t, z_mask, edge_index):
-        """Draws, for one predicted-occupied cell, its z-mask-gated connections to every
-        adjacent vehicle over the map image - one image per GAT head (collapsing to a single
-        un-suffixed image when there's only one head), matching the visualization convention
-        of the commented-out debug code in validate.py."""
-        edge_src, edge_dst = edge_index
-        edges_for_cell = [k for k, dst in enumerate(edge_dst) if dst == cell_idx]
+    def _append_frame(self, frame_bgr):
+        """Appends one BGR frame to the running simulation.mp4, rewriting the whole file so it
+        stays immediately viewable (see __init__ for why). Thread-safe."""
+        with self._lock:
+            self._call_counter += 1
+            # Burn in the call number as an on-screen label identifying which call each frame
+            # corresponds to.
+            cv2.putText(frame_bgr, f"call {self._call_counter}", (8, 22),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
-        width, height = background_img.shape[1], background_img.shape[0]
-        cell_pt = (int(cell.cx), int(cell.cy))
+            # Video requires every frame in the file to share one size; the grid's size varies
+            # with how many cells were occupied that call, so later frames are resized to
+            # match the first one.
+            if self._frame_size is None:
+                self._frame_size = (frame_rgb.shape[1], frame_rgb.shape[0])
+            elif (frame_rgb.shape[1], frame_rgb.shape[0]) != self._frame_size:
+                frame_rgb = cv2.resize(frame_rgb, self._frame_size)
+
+            self._frames.append(frame_rgb)
+            # H.264 requires even (and preferably 16-block-aligned) dimensions; our grid sizes
+            # are neither in general, so ffmpeg pads them slightly (its default behavior) rather
+            # than passing macro_block_size=1, which produced a corrupt file when a dimension
+            # was odd (H.264 flatly rejects odd width/height).
+            imageio.mimsave(self._video_path, self._frames, fps=self._video_fps)
+
+    @staticmethod
+    def _build_head_mask_grid(occupied_indices, cells, canvas, historical_adjacent_obs,
+                              last_recorded_t, z_mask, edge_index):
+        """Builds one grid image for this call: one row per occupied cell, one column per GAT
+        head. Each cell of the grid is that occupied cell's z-mask-gated connections to every
+        adjacent vehicle for that one head, drawn over `canvas` (the true map image) - the same
+        per-(cell,head) drawing convention as the debug code in validate.py, just tiled instead
+        of saved separately."""
+        edge_src, edge_dst = edge_index
+        width, height = canvas.shape[1], canvas.shape[0]
         num_heads = z_mask.shape[1]
 
+        rows = []
+        for cell_idx in occupied_indices:
+            cell = cells[cell_idx]
+            edges_for_cell = [k for k, dst in enumerate(edge_dst) if dst == cell_idx]
+            cell_pt = (int(cell.cx), int(cell.cy))
+
+            sub_images = []
+            for h in range(num_heads):
+                img = canvas.copy()
+
+                for k in edges_for_cell:
+                    vehicle_idx = edge_src[k]
+                    t = last_recorded_t[vehicle_idx]
+                    if t is None:
+                        continue  # vehicle was never actually recorded
+
+                    x_norm, y_norm = historical_adjacent_obs[vehicle_idx][t][:2]
+                    vehicle_pt = (int(x_norm * (width - 1)), int(y_norm * (height - 1)))
+
+                    if z_mask[k, h].item() >= EDGE_KEEP_THRESHOLD:
+                        cv2.line(img, cell_pt, vehicle_pt, EDGE_KEEP_COLOR, 2)
+                    else:
+                        draw_dotted_line(img, cell_pt, vehicle_pt, EDGE_DROP_COLOR, 2)
+
+                    cv2.circle(img, vehicle_pt, 5, VEHICLE_COLOR, -1)
+
+                cv2.circle(img, cell_pt, 5, OCCUPIED_CELL_COLOR, -1)
+                sub_images.append(img)
+
+            rows.append(cv2.hconcat(sub_images))
+
+        grid_body = cv2.vconcat(rows)
+
+        header = np.zeros((HEADER_HEIGHT, grid_body.shape[1], 3), dtype=np.uint8)
         for h in range(num_heads):
-            img = background_img.copy()
+            label = f"Head {h + 1}"
+            (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+            x = h * width + (width - text_w) // 2
+            y = (HEADER_HEIGHT + text_h) // 2
+            cv2.putText(header, label, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.8,
+                       (255, 255, 255), 2, cv2.LINE_AA)
 
-            for k in edges_for_cell:
-                vehicle_idx = edge_src[k]
-                t = last_recorded_t[vehicle_idx]
-                if t is None:
-                    continue  # vehicle was never actually recorded
-
-                x_norm, y_norm = historical_adjacent_obs[vehicle_idx][t][:2]
-                vehicle_pt = (int(x_norm * (width - 1)), int(y_norm * (height - 1)))
-
-                if z_mask[k, h].item() >= EDGE_KEEP_THRESHOLD:
-                    cv2.line(img, cell_pt, vehicle_pt, EDGE_KEEP_COLOR, 2)
-                else:
-                    draw_dotted_line(img, cell_pt, vehicle_pt, EDGE_DROP_COLOR, 2)
-
-                cv2.circle(img, vehicle_pt, 5, VEHICLE_COLOR, -1)
-
-            cv2.circle(img, cell_pt, 5, OCCUPIED_CELL_COLOR, -1)
-
-            filename = f"cell_{cell_idx}.png" if num_heads == 1 else f"cell_{cell_idx}_head{h}.png"
-            cv2.imwrite(os.path.join(call_dir, filename), img)
+        return cv2.vconcat([header, grid_body])
 
     @staticmethod
     def _build_raw_vehicle_obs(vehicle, expected_t):

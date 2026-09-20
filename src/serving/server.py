@@ -44,11 +44,14 @@ def serve():
     scene_ids = [f"{s:02d}" for s in range(data_config['start_scene'], data_config['end_scene'] + 1)]
     background_images = feature_builder.load_background_images(
         data_config['dataset_dir'], scene_ids, data_config['start_scene'], data_config['end_scene'])
+    true_map_images = feature_builder.load_background_images(
+        data_config['dataset_dir'], scene_ids, data_config['start_scene'], data_config['end_scene'],
+        subdir='')
     semantic_maps = feature_builder.load_semantic_maps(background_images)
 
     servicer = OGMInferenceServicer(
         model, background_images, semantic_maps, data_config['history_length'], device,
-        viz_output_dir=args.viz_output_dir)
+        viz_output_dir=args.viz_output_dir, true_map_images=true_map_images)
 
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=args.max_workers))
     ogm_inference_pb2_grpc.add_OGMInferenceServiceServicer_to_server(servicer, server)

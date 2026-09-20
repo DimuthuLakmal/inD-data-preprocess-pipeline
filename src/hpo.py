@@ -96,7 +96,7 @@ def keep_only_overall_best_checkpoint(trial, trial_value, results_dir, trial_con
         return
 
     checkpoints_dir = os.path.normpath(os.path.join(results_dir, "..", "checkpoints"))
-    stable_best_path = os.path.join(checkpoints_dir, "best_optuna_trial.pt")
+    stable_best_path = os.path.join(checkpoints_dir, "best_optuna_trial_vstsbgat_no_7-17-scenes.pt")
     stable_best_config_path = os.path.join(checkpoints_dir, "best_optuna_trial_config.yaml")
 
     prior_values = [t.value for t in trial.study.get_trials(deepcopy=False)
@@ -162,7 +162,7 @@ def main():
     print(f"Best params: {study.best_params}")
 
     best_config = apply_params(base_config, study.best_params)
-    out_path = "../configs/config_all_scenes_convnext.yaml"
+    out_path = "../configs/config_hpo_no_7-17-scenes.yaml"
     with open(out_path, "w") as f:
         yaml.safe_dump(best_config, f)
     print(f"Best config written to {out_path}")
@@ -170,7 +170,7 @@ def main():
     # keep_only_overall_best_checkpoint() already keeps this up to date after every trial -
     # nothing left to copy here, just report whether one exists.
     stable_best_path = os.path.normpath(
-        os.path.join(results_dir, "..", "checkpoints", "best_optuna_trial.pt"))
+        os.path.join(results_dir, "..", "checkpoints", "best_optuna_trial_vstsbgat_no_7-17-scenes.pt"))
     if os.path.exists(stable_best_path):
         print(f"Best-known checkpoint available at {stable_best_path}")
     else:

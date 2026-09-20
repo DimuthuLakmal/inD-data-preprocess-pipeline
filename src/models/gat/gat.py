@@ -48,6 +48,8 @@ class GATv2Conv(MessagePassing):
             bias: bool = True,
             share_weights: bool = False,
             residual: bool = False,
+            head_diversity_weight: float = 0.0,
+            l0_loss_weights: Optional[list] = None,
             **kwargs,
     ):
         super().__init__(node_dim=0, **kwargs)
@@ -55,6 +57,17 @@ class GATv2Conv(MessagePassing):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.heads = heads
+        self.head_diversity_weight = head_diversity_weight
+
+        if l0_loss_weights is not None:
+            if len(l0_loss_weights) != heads:
+                raise ValueError(
+                    f"l0_loss_weights has {len(l0_loss_weights)} entries but heads={heads}")
+            self.register_buffer('l0_loss_weights',
+                                 torch.tensor(l0_loss_weights, dtype=torch.float32))
+        else:
+            self.l0_loss_weights = None
+
         self.concat = concat
         self.negative_slope = negative_slope
         self.dropout = dropout
@@ -412,8 +425,29 @@ class GATv2Conv(MessagePassing):
         else:
             z_raw = l0_test(logits, 0.0, 1.0)  # [E, H]
 
-        # L0 regularisation term.
-        self.loss = get_loss2(logits).sum()
+        # L0 regularisation term. Summed over edges first so an optional per-head
+        # weight (config-driven, e.g. to give heads different effective sparsity
+        # pressure) can be applied before collapsing to the scalar every caller expects.
+        loss_per_head = get_loss2(logits).sum(dim=0)  # [H]
+        if self.l0_loss_weights is not None:
+            loss_per_head = loss_per_head * self.l0_loss_weights
+        self.loss = loss_per_head.sum()
+
+        # Head-diversity regularisation: with concat=False, GAT head outputs are averaged
+        # together (see forward()), so nothing otherwise stops every head from converging to
+        # the same z-mask. Penalise pairwise similarity between heads' per-edge logits to push
+        # them apart.
+        if self.heads > 1 and self.head_diversity_weight > 0:
+            # logits is [E, H], already mean-0/std-1 per head (normalisation above) - unit-norm
+            # each head's column so the dot product below is a cosine similarity.
+            normed = logits / (logits.norm(dim=0, keepdim=True) + 1e-8)  # [E, H]
+            sim = normed.t() @ normed  # [H, H] pairwise cosine similarity between heads
+            off_diag = ~torch.eye(self.heads, dtype=torch.bool, device=logits.device)
+            # Squared, not raw, similarity: minimising raw cosine similarity would just push
+            # heads toward perfect anti-correlation (sim=-1), which is exactly as degenerate/
+            # structured as sim=+1. Squaring makes sim=0 (decorrelated) the optimum instead.
+            diversity_penalty = sim[off_diag].pow(2).mean()
+            self.loss = self.loss + self.head_diversity_weight * diversity_penalty
 
         return z_raw
 

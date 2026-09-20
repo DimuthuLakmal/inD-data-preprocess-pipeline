@@ -18,6 +18,9 @@ def create_args():
                        help="Path to a model state_dict .pt file. Defaults to config['model']['model_input_path'].")
     parser.add_argument('--port', default=50051, type=int)
     parser.add_argument('--max-workers', default=4, type=int)
+    parser.add_argument('--viz-output-dir', default="../results/serving_visualizations", type=str,
+                       help="Directory under which each call's z-mask visualizations are saved, "
+                            "in a per-call call_NNNNN subfolder.")
     return parser.parse_args()
 
 
@@ -44,7 +47,8 @@ def serve():
     semantic_maps = feature_builder.load_semantic_maps(background_images)
 
     servicer = OGMInferenceServicer(
-        model, background_images, semantic_maps, data_config['history_length'], device)
+        model, background_images, semantic_maps, data_config['history_length'], device,
+        viz_output_dir=args.viz_output_dir)
 
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=args.max_workers))
     ogm_inference_pb2_grpc.add_OGMInferenceServiceServicer_to_server(servicer, server)

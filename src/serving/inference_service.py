@@ -5,6 +5,7 @@ import cv2
 import imageio
 import numpy as np
 import torch
+import torch.nn.functional as F
 import grpc
 
 from src.dataset import feature_builder
@@ -18,6 +19,7 @@ VEHICLE_COLOR = (0, 255, 0)
 OCCUPIED_CELL_COLOR = (235, 52, 52)
 MAX_CELLS_PER_FRAME = 3  # cap rows per grid frame
 HEADER_HEIGHT = 40
+PYRAMID_STAGES = ("s4", "s8", "s16", "s32")  # shared by ConvNeXtMapEncoder and RegNetY800MFMapEncoder
 
 
 class OGMInferenceServicer(ogm_inference_pb2_grpc.OGMInferenceServiceServicer):
@@ -39,20 +41,40 @@ class OGMInferenceServicer(ogm_inference_pb2_grpc.OGMInferenceServiceServicer):
         # and is the fallback here if a scene has no true-map image loaded.
         self.true_map_images = true_map_images or {}
 
-        # One running video for the server's lifetime, one frame per call that has at least one
-        # occupied cell (calls with none are skipped, contributing no frame). A GIF's per-frame
-        # duration is unreliably honored by many viewers (plays back much faster than set), so
-        # this is an actual mp4 with an explicit fps instead. Frames are kept in memory and the
-        # whole file is rewritten after every call - that makes the file appear and stay current
-        # immediately while the server runs, at the cost of O(frames-so-far) work per call; fine
-        # for a debug/analysis tool.
+        # Two running videos for the server's lifetime, one frame per call that has at least one
+        # occupied cell (calls with none are skipped, contributing no frame): "heads" (the z-mask
+        # per-head grid) and "gradcam" (per-scale Grad-CAM heatmaps, see _build_gradcam_grid). A
+        # GIF's per-frame duration is unreliably honored by many viewers (plays back much faster
+        # than set), so these are actual mp4s with an explicit fps instead. Frames are kept in
+        # memory and the whole file is rewritten after every call - that makes the file appear
+        # and stay current immediately while the server runs, at the cost of O(frames-so-far)
+        # work per call; fine for a debug/analysis tool.
         os.makedirs(viz_output_dir, exist_ok=True)
-        self._video_path = os.path.join(viz_output_dir, "simulation.mp4")
         self._video_fps = 0.5  # 1 frame every 2s - adjust to taste
-        self._frames = []
-        self._frame_size = None  # (W, H) of the first frame - video requires every frame to match
+        self._video_streams = {
+            "heads": {"frames": [], "path": os.path.join(viz_output_dir, "simulation.mp4"),
+                     "frame_size": None},
+            "gradcam": {"frames": [], "path": os.path.join(viz_output_dir, "simulation_gradcam.mp4"),
+                       "frame_size": None},
+        }
         self._call_counter = 0
         self._lock = threading.Lock()
+
+        # Per-scale Grad-CAM: capture the raw ConvNeXt/RegNet pyramid via a forward hook (rather
+        # than threading it through VSTSBGT.forward's return value, which every caller - train.py,
+        # validate.py, test.py, find_best_threshold.py, this file's own no-grad forward above -
+        # unpacks as a fixed-size tuple). retain_grad() is needed because the pyramid tensors are
+        # non-leaf intermediates, which don't populate .grad after backward() otherwise.
+        self._last_pyramid = None
+        self.model.semantic_context_encoder.register_forward_hook(self._capture_pyramid_hook)
+        self._gradcam_lock = threading.Lock()  # serializes the grad-enabled forward+backward section
+
+    def _capture_pyramid_hook(self, module, inputs, output):
+        pyramid = output["map_pyramid"]
+        for t in pyramid.values():
+            if t.requires_grad:  # this hook also fires on the earlier torch.no_grad() forward
+                t.retain_grad()
+        self._last_pyramid = pyramid
 
     def PredictOccupancy(self, request, context):
         background_img = self.background_images.get(request.scene_id)
@@ -110,39 +132,48 @@ class OGMInferenceServicer(ogm_inference_pb2_grpc.OGMInferenceServiceServicer):
                 occupied_indices.append(i)
 
         if occupied_indices:
+            with self._lock:
+                self._call_counter += 1
+                call_id = self._call_counter
+
             canvas = self.true_map_images.get(request.scene_id, background_img)
-            grid = self._build_head_mask_grid(occupied_indices[:MAX_CELLS_PER_FRAME], request.cells,
-                                              canvas, historical_adjacent_obs, last_recorded_t,
+            capped_indices = occupied_indices[:MAX_CELLS_PER_FRAME]
+
+            grid = self._build_head_mask_grid(capped_indices, request.cells, canvas,
+                                              historical_adjacent_obs, last_recorded_t,
                                               z_mask, edge_index)
-            self._append_frame(grid)
+            self._append_frame(grid, "heads", call_id)
+
+            gradcam_grid = self._build_gradcam_grid(capped_indices, canvas, inputs)
+            self._append_frame(gradcam_grid, "gradcam", call_id)
 
         return response
 
-    def _append_frame(self, frame_bgr):
-        """Appends one BGR frame to the running simulation.mp4, rewriting the whole file so it
-        stays immediately viewable (see __init__ for why). Thread-safe."""
+    def _append_frame(self, frame_bgr, stream_key, call_id):
+        """Appends one BGR frame to the named running video (see __init__), rewriting the whole
+        file so it stays immediately viewable. Thread-safe."""
+        stream = self._video_streams[stream_key]
         with self._lock:
-            self._call_counter += 1
             # Burn in the call number as an on-screen label identifying which call each frame
-            # corresponds to.
-            cv2.putText(frame_bgr, f"call {self._call_counter}", (8, 22),
+            # corresponds to - shared across streams so "call N" lines up between them.
+            cv2.putText(frame_bgr, f"call {call_id}", (8, 22),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
             # Video requires every frame in the file to share one size; the grid's size varies
             # with how many cells were occupied that call, so later frames are resized to
             # match the first one.
-            if self._frame_size is None:
-                self._frame_size = (frame_rgb.shape[1], frame_rgb.shape[0])
-            elif (frame_rgb.shape[1], frame_rgb.shape[0]) != self._frame_size:
-                frame_rgb = cv2.resize(frame_rgb, self._frame_size)
+            if stream["frame_size"] is None:
+                stream["frame_size"] = (frame_rgb.shape[1], frame_rgb.shape[0])
+            elif (frame_rgb.shape[1], frame_rgb.shape[0]) != stream["frame_size"]:
+                frame_rgb = cv2.resize(frame_rgb, stream["frame_size"])
 
-            self._frames.append(frame_rgb)
+            stream["frames"].append(frame_rgb)
             # H.264 requires even (and preferably 16-block-aligned) dimensions; our grid sizes
             # are neither in general, so ffmpeg pads them slightly (its default behavior) rather
             # than passing macro_block_size=1, which produced a corrupt file when a dimension
             # was odd (H.264 flatly rejects odd width/height).
-            imageio.mimsave(self._video_path, self._frames, fps=self._video_fps)
+            imageio.mimsave(stream["path"], stream["frames"], fps=self._video_fps)
 
     @staticmethod
     def _build_head_mask_grid(occupied_indices, cells, canvas, historical_adjacent_obs,
@@ -185,20 +216,65 @@ class OGMInferenceServicer(ogm_inference_pb2_grpc.OGMInferenceServiceServicer):
                 cv2.circle(img, cell_pt, 5, OCCUPIED_CELL_COLOR, -1)
                 sub_images.append(img)
 
-            rows.append(cv2.hconcat(sub_images))
+            rows.append(sub_images)
 
-        grid_body = cv2.vconcat(rows)
+        return OGMInferenceServicer._stack_labeled_grid(
+            rows, [f"Head {h + 1}" for h in range(num_heads)])
+
+    @staticmethod
+    def _stack_labeled_grid(rows, column_labels):
+        """Tiles `rows` (a list of rows, each a list of same-sized BGR images, one per column)
+        into a single grid image with a labeled header strip on top - shared by
+        _build_head_mask_grid and _build_gradcam_grid."""
+        column_width = rows[0][0].shape[1]
+        grid_body = cv2.vconcat([cv2.hconcat(row) for row in rows])
 
         header = np.zeros((HEADER_HEIGHT, grid_body.shape[1], 3), dtype=np.uint8)
-        for h in range(num_heads):
-            label = f"Head {h + 1}"
+        for col, label in enumerate(column_labels):
             (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
-            x = h * width + (width - text_w) // 2
+            x = col * column_width + (column_width - text_w) // 2
             y = (HEADER_HEIGHT + text_h) // 2
             cv2.putText(header, label, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.8,
                        (255, 255, 255), 2, cv2.LINE_AA)
 
         return cv2.vconcat([header, grid_body])
+
+    def _build_gradcam_grid(self, occupied_indices, canvas, inputs):
+        """Builds one grid image for this call: one row per occupied cell, one column per
+        pyramid scale (s4/s8/s16/s32). Each grid cell is a Grad-CAM heatmap - computed from that
+        cell's own occupancy logit - overlaid on `canvas`, showing which part of the map that
+        scale's features drew on for THIS specific prediction.
+
+        Reuses one grad-enabled forward pass (the pyramid tensors, captured via
+        _capture_pyramid_hook, are shared across cells since backward() is called once per cell
+        with retain_graph=True) rather than a fresh forward pass per cell.
+        """
+        with self._gradcam_lock:
+            self.model.zero_grad(set_to_none=True)
+            out_fc, _, _, _ = self.model(inputs)  # grad-enabled; hook populates self._last_pyramid
+            pyramid = self._last_pyramid
+
+            rows = []
+            for cell_idx in occupied_indices:
+                for t in pyramid.values():
+                    t.grad = None  # reset before this cell's backward - graph is shared/retained
+                out_fc[0, cell_idx, 0].backward(retain_graph=True)
+
+                row = []
+                for stage in PYRAMID_STAGES:
+                    activation = pyramid[stage][0]        # [C, H, W]
+                    grad = pyramid[stage].grad[0]          # [C, H, W]
+                    weights = grad.mean(dim=(1, 2))        # [C]
+                    cam = F.relu((weights[:, None, None] * activation).sum(dim=0))  # [H, W]
+                    cam = (cam / (cam.max() + 1e-8)).detach().cpu().numpy()
+                    cam_resized = cv2.resize(cam, (canvas.shape[1], canvas.shape[0]))
+                    heat = cv2.applyColorMap((cam_resized * 255).astype(np.uint8), cv2.COLORMAP_JET)
+                    row.append(cv2.addWeighted(canvas, 0.5, heat, 0.5, 0))
+                rows.append(row)
+
+            self._last_pyramid = None  # release the retained graph
+
+        return self._stack_labeled_grid(rows, list(PYRAMID_STAGES))
 
     @staticmethod
     def _build_raw_vehicle_obs(vehicle, expected_t):
